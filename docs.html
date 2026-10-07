@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shokz Auto-Fill — documentation</title>
-<meta name="description" content="Automatically fill a Shokz player from Navidrome when it mounts — and the macOS privacy rule that stops a background job writing to a removable volume.">
+<title>Shokz Auto-Fill documentation</title>
+<meta name="description" content="Automatically fill a Shokz player from Navidrome when it mounts, plus the macOS permission rule that governs writing to a removable volume.">
 <style>
   :root{
     --bg:#0a0d14; --bg2:#0e131d; --panel:#131926; --panel2:#182031;
@@ -230,9 +230,9 @@
     <a href="#update">Updating</a>
     <a href="#config">Configuration</a>
     <a href="#installed">What gets installed</a>
-    <a href="#trap">The macOS trap</a>
-    <a href="#caveat">Keeping the grant</a>
-    <a href="#behaviour">Behaviour &amp; limits</a>
+    <a href="#trap">Writing to the device</a>
+    <a href="#caveat">Keeping the permission working</a>
+    <a href="#behaviour">Behaviour and limits</a>
     <a href="#trouble">Troubleshooting</a>
     <a href="#security">Security</a>
     <a href="#uninstall">Uninstall</a>
@@ -241,12 +241,11 @@
   <main>
 
     <div class="hero" id="overview">
-      <h1>Fill the player <span class="grad">automatically</span>,<br>and understand why it's not trivial</h1>
+      <h1>Fills the player <span class="grad">when you plug it in</span></h1>
       <p class="lede">
-        Plug in a Shokz (or any USB-storage) player and it gets a fresh random set of
-        songs from Navidrome, keeps the two newest lists, then ejects itself. The script
-        is the easy part — the reason this needs an installer is a macOS privacy rule
-        that blocks background jobs from writing to removable volumes, silently.
+        Plug in a Shokz, or any USB-storage player, and it gets a fresh random set of
+        songs from Navidrome. The two newest lists stay, older ones are pruned, and the
+        device ejects itself when the download finishes.
       </p>
       <div class="pills">
         <span class="pill"><b>macOS</b></span>
@@ -260,15 +259,15 @@
     <!-- ============ QUICKSTART ============ -->
     <section id="quickstart">
       <h2><span class="num">01</span>Install</h2>
-      <p>Double-click <code>install.command</code> — or run it in a terminal. It asks three
-        things and verifies them <em>before</em> writing anything.</p>
+      <p>Double-click <code>install.command</code>, or run it in a terminal. It asks for a few
+      settings and checks them against the server before it writes anything.</p>
 
       <div class="tablewrap">
         <table>
           <thead><tr><th>Prompt</th><th>Notes</th></tr></thead>
           <tbody>
             <tr><td><strong>Device</strong></td><td>The volume name, i.e. the folder under <code>/Volumes</code>. Mounted volumes are listed with numbers so you can just pick one.</td></tr>
-            <tr><td><strong>Navidrome URL(s)</strong></td><td>One or more, space- or comma-separated, tried in order until one answers. Put a LAN address first, then a remote one.</td></tr>
+            <tr><td>Navidrome URLs</td><td>One or more, space- or comma-separated, tried in order until one answers. Put a LAN address first, then a remote one.</td></tr>
             <tr><td><strong>Username / password</strong></td><td>Password input is not echoed. If an older install with a hard-coded password is found, it offers to reuse it.</td></tr>
             <tr><td><strong>Songs per fill</strong></td><td>Default 50. Validated as a positive whole number.</td></tr>
           </tbody>
@@ -286,9 +285,8 @@ reachable   : https://music.example.com (Subsonic status='failed' - check the lo
           typo surfaces during install instead of silently producing empty fills later.</p>
       </div>
 
-      <p>Finally it asks for <strong>removable-volume permission</strong> — macOS shows a dialog;
-        click <em>Allow</em>. That step is the whole reason this project exists, and it is explained in
-        <a href="#trap">the macOS trap</a>.</p>
+      <p>It then requests removable-volume permission, which macOS shows as a dialog. Click Allow.
+      <a href="#trap">Why that is necessary</a> is covered further down.</p>
     </section>
 
     <!-- ============ FLOW ============ -->
@@ -307,20 +305,19 @@ reachable   : https://music.example.com (Subsonic status='failed' - check the lo
       </div>
 
       <div class="card">
-        <h4><span class="ico">⟳</span> A lock, so overlapping mount events can't double-fill</h4>
-        <p>A state file (<code>/tmp/shokz-auto-fill.state</code>) is taken for the duration and released on
-          exit — success, abort, or crash. If a run is ever killed hard and the lock sticks, delete that
-          file and replug. If a run downloads nothing at all, it <strong>aborts without deleting
-          anything</strong>, so existing music is never lost to a bad network day.</p>
+        <h4>A lock, so overlapping mount events can't double-fill</h4>
+        <p>A state file at <code>/tmp/shokz-auto-fill.state</code> is held for the duration of a run and
+          released on exit, whether it succeeded, aborted, or crashed. If a run is killed hard and
+          the lock sticks, delete that file and replug. A run that downloads nothing aborts without
+          deleting anything, so a bad network day never costs you the music already on the device.</p>
       </div>
     </section>
 
     <!-- ============ UPDATE ============ -->
     <section id="update">
       <h2><span class="num">03</span>Updating an existing install</h2>
-      <p>Run <code>install.command</code> again. It detects what's installed, shows the current
-        settings, and asks what to change — so you can bump the song count without touching
-        anything else.</p>
+      <p>Run <code>install.command</code> again. It reports what is installed and what it is set to,
+        then asks what to change, so you can raise the song count without touching anything else.</p>
 
       <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>An existing installation was found.
   config : ~/.config/shokz-auto-fill/config
@@ -348,10 +345,10 @@ Choice [a]:</code></pre></div>
 
       <div class="callout">
         <p class="t">Settings changes take effect immediately</p>
-        <p>The script and the agent read the config <em>at run time</em>, so changing a setting needs no
-          reload — and no server check, unless you changed the URL or the login. Option <strong>5</strong>
-          is for reinstalling the script and agent themselves, for example to re-request the volume
-          permission. On a first run, everything happens automatically.</p>
+        <p>The script and the agent read the config <em>at run time</em>, so a settings change takes effect
+          on the next fill with no reload. The server is only checked again if you changed the URL
+          or the login. Option 5 reinstalls the script and agent themselves, which is what you want
+          when re-requesting the volume permission. A first run does all of it.</p>
       </div>
     </section>
 
@@ -389,21 +386,23 @@ tail -f /tmp/shokz-auto-fill.log</code></pre></div>
           <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
           <tbody>
             <tr><td><code>~/Library/Application Support/ShokzAutoFill/bin/auto_fill_shokz.sh</code></td><td>the fill script</td></tr>
-            <tr><td><code>~/.config/shokz-auto-fill/config</code></td><td>device, URLs, credentials — <strong>mode 600</strong></td></tr>
+            <tr><td><code>~/.config/shokz-auto-fill/config</code></td><td>device, URLs and credentials, mode 600</td></tr>
             <tr><td><code>~/Library/LaunchAgents/com.brookjordan.shokz-auto-fill.plist</code></td><td>runs the script when <code>/Volumes</code> changes</td></tr>
             <tr><td><code>/tmp/shokz-auto-fill.log</code></td><td>the job's own log, trimmed to the last 1000 lines</td></tr>
           </tbody>
         </table>
       </div>
-      <p>The installer also retires the older layout: it unloads the legacy agent
+      <p>The installer also retires the older layout. It unloads the legacy agent
         <code>com.n8n.swimpro</code> and parks <code>io.shokz.auto-fill.plist</code> as
-        <code>.disabled</code>, so both designs don't fight over the same device.</p>
+        <code>.disabled</code>, so two agents do not compete for the same device.</p>
     </section>
 
     <!-- ============ TRAP ============ -->
     <section id="trap">
-      <h2><span class="num">06</span>The macOS trap</h2>
-      <p>Worth reading in full if you ever "simplify" this and it stops working with no error.</p>
+      <h2><span class="num">06</span>Writing to the device</h2>
+      <p>A background job cannot write to a removable volume on macOS without a permission the job
+        has to be able to ask for. This is the reference for that, and it is the one part of the
+        setup that breaks quietly.</p>
 
       <h3>Symptom</h3>
       <p>The job fires. It finds the device. It reaches Navidrome. It fetches song IDs. Then every
@@ -420,8 +419,8 @@ ABORT: All downloads failed against Tailscale.</pre>
       <h3>Cause</h3>
       <p>macOS gates removable volumes behind the TCC service
         <code>kTCCServiceSystemPolicyRemovableVolumes</code>. When a LaunchAgent runs
-        <code>/bin/bash</code>, bash <em>is</em> the responsible process — and <code>/bin/bash</code> is
-        an Apple <strong>platform binary</strong>:</p>
+        <code>/bin/bash</code>, bash <em>is</em> the responsible process, and <code>/bin/bash</code> is
+      an Apple platform binary:</p>
       <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>$ codesign -dvvv /bin/bash | grep Platform
 Platform identifier=26</code></pre></div>
       <p>macOS will not grant TCC permissions to a platform binary, and cannot even ask:</p>
@@ -431,18 +430,18 @@ Platform identifier=26</code></pre></div>
 responsible_path=/bin/bash   subject=/bin/bash
 <span class="hl">Platform binary prompting is 'Deny' because: is Platform Binary</span></pre>
       </div>
-      <p>So the denial is permanent and silent. An interactive shell never hits it, because then the
-        <em>parent app</em> is responsible, not bash — which is exactly why it "works when I run it by
-        hand".</p>
+      <p>The denial is permanent and silent. An interactive shell never hits it, because then the
+      <em>parent app</em> is responsible rather than bash. That is why the same command works when
+      you run it by hand.</p>
 
       <div class="vs">
         <div class="card good">
-          <h4><span class="ico">✓</span> Running it by hand</h4>
+          <h4>Running it by hand</h4>
           <p style="font-size:13.6px;color:var(--muted)">You in Terminal run <code>bash fill.sh</code>. TCC attributes the request to the <em>app</em>.</p>
           <div class="verdict good">responsible = Terminal → can be granted ✓</div>
         </div>
         <div class="card bad">
-          <h4><span class="ico">✕</span> Running from the agent</h4>
+          <h4>Running from the agent</h4>
           <p style="font-size:13.6px;color:var(--muted)">launchd runs <code>/bin/bash fill.sh</code>. There is no parent app, so bash is responsible.</p>
           <div class="verdict bad">responsible = /bin/bash → platform binary → always denied ✕</div>
         </div>
@@ -463,23 +462,23 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
       <div class="callout danger">
         <p class="t">Do not change the interpreter back to /bin/bash</p>
         <p>The installed script's shebang is rewritten to the resolved Homebrew bash. Pointing the agent
-          at <code>/bin/bash</code> — or "simplifying" the shebang — restores the silent, permanent denial.</p>
+          at <code>/bin/bash</code>, or trimming the shebang back, brings the denial straight back.</p>
       </div>
     </section>
 
     <!-- ============ CAVEAT ============ -->
     <section id="caveat">
-      <h2><span class="num">07</span>Keeping the grant alive</h2>
-      <p>For an unsigned binary, macOS keys the grant by <strong>path</strong> — and it resolves
-        symlinks. So the grant binds to a versioned Cellar path:
+      <h2><span class="num">07</span>Keeping the permission working</h2>
+      <p>For an unsigned binary, macOS keys the grant by path, and it resolves symlinks. The grant
+        therefore binds to a versioned Cellar path such as
         <code>/opt/homebrew/Cellar/bash/5.3.20/bin/bash</code>.</p>
 
       <div class="callout warn">
-        <p class="t">A <code>brew upgrade bash</code> silently breaks the job</p>
+        <p class="t">A <code>brew upgrade bash</code> breaks the job</p>
         <p>The path moves to <code>…/bash/5.3.21/…</code>, the grant no longer applies, and fills fail
           exactly as before. Two ways to handle it:</p>
         <ul>
-          <li><strong>Re-run <code>install.command</code></strong> after upgrading bash (option 5). It repeats
+          <li><strong>Re-run <code>install.command</code></strong> after upgrading bash, by choosing option 5. It repeats
             the permission probe, so the prompt returns and the grant is re-created. <em>Default advice.</em></li>
           <li><strong>Pin bash</strong> so the path never moves: <code>brew pin bash</code>. Durable, but you
             stop receiving bash updates.</li>
@@ -495,19 +494,19 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
       <h2><span class="num">08</span>Behaviour and limits</h2>
       <div class="grid two">
         <div class="card">
-          <h4><span class="ico">⏏</span> It ejects when done</h4>
-          <p>On success the device is ejected (<code>diskutil eject</code>). That is intentional — unplug and listen.</p>
+          <h4>It ejects when done</h4>
+          <p>On success the device is ejected with <code>diskutil eject</code>. Unplug it and listen.</p>
         </div>
         <div class="card">
-          <h4><span class="ico">🗂</span> Only two lists survive</h4>
+          <h4>Only two lists survive</h4>
           <p>Numbered folders are pruned to the two newest. Change <code>SONG_COUNT</code> to size each list.</p>
         </div>
         <div class="card">
-          <h4><span class="ico">🔒</span> Single-flight</h4>
+          <h4>Single-flight</h4>
           <p>A lock file prevents overlapping <code>/Volumes</code> events from filling twice at once.</p>
         </div>
         <div class="card">
-          <h4><span class="ico">🛟</span> Fails safe</h4>
+          <h4>Fails safe</h4>
           <p>A fill that downloads nothing aborts and leaves the existing music untouched.</p>
         </div>
       </div>
@@ -520,7 +519,7 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
         <table>
           <thead><tr><th>Symptom</th><th>Check</th></tr></thead>
           <tbody>
-            <tr><td>Nothing happens on plug-in</td><td><code>launchctl list | grep shokz</code> — is the agent loaded? Does <code>DEVICE_NAME</code> exactly match the volume?</td></tr>
+            <tr><td>Nothing happens on plug-in</td><td><code>launchctl list | grep shokz</code>. Is the agent loaded? Does <code>DEVICE_NAME</code> exactly match the volume?</td></tr>
             <tr><td><code>Operation not permitted</code> in the log</td><td>The removable-volume grant is missing. Re-run <code>install.command</code> and allow the dialog.</td></tr>
             <tr><td>Reaches the server, downloads 0 files</td><td>Check <code>ND_USER</code> / <code>ND_PASS</code>; the log prints the Subsonic status.</td></tr>
             <tr><td>Partial numbered folder left behind</td><td>A run was interrupted. Delete the half-written folder on the device.</td></tr>
@@ -535,7 +534,7 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
       <h2><span class="num">10</span>Security</h2>
       <div class="grid two">
         <div class="card">
-          <h4><span class="ico">🔑</span> Credential handling</h4>
+          <h4>Credential handling</h4>
           <ul>
             <li>Stored in the config, mode <code>600</code>, outside the repo.</li>
             <li><code>config/config</code> is git-ignored as a backstop.</li>
@@ -544,10 +543,10 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
           </ul>
         </div>
         <div class="card">
-          <h4><span class="ico">⚠</span> Rotate the old password</h4>
+          <h4>Rotate the old password</h4>
           <p>The password this replaces was stored in <strong>plain text</strong> in
             <code>~/.bin/scripts/auto_fill_shokz.sh</code>, and that file was committed to a git
-            repository — so treat it as exposed and change it on the server. Once the installer has
+            repository, so treat it as exposed and change it on the server. Once the installer has
             migrated to the config, delete that line.</p>
         </div>
       </div>
@@ -557,7 +556,7 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
     <section id="uninstall">
       <h2><span class="num">11</span>Uninstall</h2>
       <p>Run <code>uninstall.command</code>. It unloads and removes the agent and the installed script,
-        and asks separately before deleting the config (which holds the password). Music on the device
+        and asks separately before deleting the config, since it holds the password. Music on the device
         is never touched.</p>
       <div class="callout warn">
         <p class="t">The permission grant is left alone on purpose</p>
@@ -568,8 +567,8 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
     </section>
 
     <footer>
-      <p>Shokz Auto-Fill — installer, uninstaller and the removable-volume fix.
-        This page is a single self-contained file: no external assets, no network, no build step.</p>
+      <p>Shokz Auto-Fill. Installer, uninstaller and the removable-volume fix.
+        This page is one self-contained file with no external assets and no build step.</p>
     </footer>
 
   </main>

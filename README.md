@@ -1,22 +1,20 @@
 # shokz-auto-fill
 
-When a Shokz (or any USB-storage) player is plugged in, this downloads a fresh
+When a Shokz player, or any USB-storage player, is plugged in, this downloads a fresh
 random set of songs from [Navidrome](https://www.navidrome.org/) onto it, keeps
 the two newest lists, and ejects the device.
 
-It exists because of the problem it solves and the problem it works around: the
-fill itself is a shell script, and a **macOS privacy rule silently prevents a
-background job from writing to a removable volume** unless you know why. That
-rule and its fix are documented below, because it is the whole reason this
-installer is more than `cp` and a plist.
+The fill itself is a shell script. What makes it more than `cp` and a plist is a macOS
+rule that stops a background job writing to a removable volume, and the permission the
+job needs first. That is documented in full further down.
 
-> **Read this in a browser:** `docs.html` is a self-contained HTML version of this
-> documentation — no external assets, no network, no build step. Open it directly.
+There is also `docs.html`, a self-contained HTML version of this documentation.
+No external assets, no network and no build step; open it directly in a browser.
 
 ## Requirements
 
 - macOS
-- [Homebrew](https://brew.sh) (used to install `bash` and, if missing, `jq`)
+- [Homebrew](https://brew.sh), used to install `bash` and, if missing, `jq`
 - A reachable Navidrome server and an account on it
 - The player formatted as FAT32/exFAT and mounting under `/Volumes`
 
@@ -37,13 +35,13 @@ It then **verifies the URL and login against the server before installing**, and
 reports each URL as reachable + authenticated, reachable but rejected, or
 unreachable. Nothing is written unless you continue.
 
-Finally it requests removable-volume permission — **macOS shows a dialog; click
-Allow.** See below for why this step exists.
+It then requests removable-volume permission, which macOS shows as a dialog. Click
+Allow. See below for why this step exists.
 
 ## Updating an existing install
 
 Just run `install.command` again. It detects the existing installation, shows what
-is configured now, and asks what to change:
+is configured, and asks what to change:
 
 ```
 An existing installation was found.
@@ -67,22 +65,22 @@ What would you like to update?  (one number, several separated by spaces, or 'a'
   q) quit without changing anything
 ```
 
-Enter one number, several (e.g. `1 3`), `a` for everything, or `q` to leave
+Enter one number, or several such as `1 3`, or `a` for everything, or `q` to leave
 things alone.
 
-Because the script and the agent read the config at run time, changing a
-**setting** takes effect on the very next fill — no reload, and no server check
-unless you changed the URL or the login.
+Because the script and the agent read the config at run time, a settings change takes
+effect on the very next fill with no reload. The server is only checked again if you
+changed the URL or the login.
 
 Choose **5** when you want to reinstall the script and the agent themselves, for
 example to re-request the removable-volume permission after a Homebrew `bash`
-upgrade (see the caveat further down). On a first run the installer does
+upgrade, which the caveat further down covers. On a first run the installer does
 everything automatically.
 
 ## Uninstall
 
 Double-click **`uninstall.command`**. It unloads and removes the LaunchAgent and
-the installed script, and asks separately before deleting the config (which holds
+the installed script, and asks separately before deleting the config, which holds
 the password). Music already on the device is never touched.
 
 ## What gets installed
@@ -92,7 +90,7 @@ the password). Music already on the device is never touched.
 | `~/Library/Application Support/ShokzAutoFill/bin/auto_fill_shokz.sh` | the fill script |
 | `~/.config/shokz-auto-fill/config` | device, URLs, credentials (**mode 600**) |
 | `~/Library/LaunchAgents/com.brookjordan.shokz-auto-fill.plist` | runs the script when `/Volumes` changes |
-| `/tmp/shokz-auto-fill.log` | the job's own log (trimmed to the last 1000 lines) |
+| `/tmp/shokz-auto-fill.log` | the job's own log, trimmed to the last 1000 lines |
 
 Run it as soon as the device is mounted:
 
@@ -103,11 +101,10 @@ tail -f /tmp/shokz-auto-fill.log
 
 ## Behaviour worth knowing
 
-- **On success the device is ejected** (`diskutil eject`). That is intentional —
-  unplug and listen.
+- On success the device is ejected with `diskutil eject`. Unplug it and listen.
 - **Only the two newest lists are kept**; older numbered folders are deleted.
   Set `SONG_COUNT` in the config to change the size of each list.
-- A run is guarded by a lock file (`/tmp/shokz-auto-fill.state`) so overlapping
+- A run is guarded by a lock file at `/tmp/shokz-auto-fill.state`, so overlapping
   `/Volumes` events cannot fill twice. If a run is killed mid-way the lock is
   released on exit; if one ever sticks, delete that file and replug.
 - If nothing can be downloaded, the script **aborts without deleting anything**,
@@ -117,11 +114,11 @@ tail -f /tmp/shokz-auto-fill.log
 
 ## The macOS trap this works around
 
-This is the part worth reading if you ever "simplify" the setup and it stops
-working with no error.
+A background job cannot write to a removable volume on macOS without a permission the
+job has to be able to ask for. This section is the reference for that.
 
-**Symptom.** The job fires, finds the device, reaches Navidrome, fetches song
-IDs — then every `mkdir` on the device fails:
+**Symptom.** The job fires, finds the device, reaches Navidrome, fetches song IDs, then
+every `mkdir` on the device fails:
 
 ```
 mkdir: /Volumes/SWIM PRO/auto-list/1: Operation not permitted
@@ -129,8 +126,7 @@ mkdir: /Volumes/SWIM PRO/auto-list/1: Operation not permitted
 
 **Cause.** macOS gates removable volumes behind the TCC service
 `kTCCServiceSystemPolicyRemovableVolumes`. When a LaunchAgent runs `/bin/bash`,
-bash *is* the "responsible process" — and `/bin/bash` is an Apple **platform
-binary**:
+bash *is* the "responsible process", and `/bin/bash` is an Apple **platform binary**:
 
 ```sh
 $ codesign -dvvv /bin/bash | grep Platform
@@ -143,9 +139,9 @@ macOS will not grant TCC permissions to a platform binary, and cannot even ask:
 Platform binary prompting is 'Deny' because: is Platform Binary
 ```
 
-So the denial is permanent and silent. An interactive shell does not hit this,
-because then the responsible process is the *parent app* (e.g. Terminal), not
-bash — which is why it "works when I run it by hand".
+The denial is permanent and silent. An interactive shell does not hit it, because then
+the responsible process is the *parent app*, such as Terminal, rather than bash. That is
+why the same command works when you run it by hand.
 
 **Fix.** Run the job under a shell that is *not* a platform binary, so macOS will
 prompt and then grant:
@@ -166,7 +162,7 @@ change it back to `/bin/bash`.**
 For an unsigned binary macOS keys the grant by **path**, and it resolves
 symlinks. So the grant binds to a versioned Cellar path like
 `/opt/homebrew/Cellar/bash/5.3.20/bin/bash`. A `brew upgrade bash` moves that
-path and **the grant is silently lost** — the job then fails exactly as before.
+path and **the grant is silently lost**, after which the job fails as before.
 
 Two ways to handle it:
 
@@ -186,16 +182,16 @@ If the job ever stops filling for no visible reason, check the log for
   than sending the password, and never prints it.
 - The password it replaces was previously stored **in plain text inside
   `~/.bin/scripts/auto_fill_shokz.sh`**. That copy still exists if you have not
-  removed it — and because that file was committed to a git repository, **the
+  removed it, and because that file was committed to a git repository, **the
   password should be considered exposed and rotated** on the Navidrome server.
-  Once rotated, update this config (re-run the installer) and delete the old line
+  Once rotated, update this config by re-running the installer, then delete the old line
   from that script.
 
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
-| Nothing happens on plug-in | `launchctl list \| grep shokz` — is the agent loaded? Is the volume name exactly right in the config? |
+| Nothing happens on plug-in | `launchctl list \| grep shokz` says whether the agent is loaded. Check the volume name in the config too. |
 | `Operation not permitted` in the log | The removable-volume grant is missing. Re-run `install.command` and allow the dialog. |
 | Reaches the server but downloads 0 files | Check `ND_USER` / `ND_PASS`; the log prints the Subsonic status. |
 | Fills, then leaves a partial folder | A run was interrupted. Delete the half-written numbered folder on the device. |
