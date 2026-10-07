@@ -41,6 +41,15 @@ fi
 command -v python3 >/dev/null 2>&1 || { echo "python3 is required"; exit 1; }
 command -v perl >/dev/null 2>&1 || { echo "perl is required for run timeouts"; exit 1; }
 
+# The installer needs a non-platform bash and will try to brew-install one. That takes
+# longer than a run timeout, which turns into confusing failures, so check up front.
+if [ ! -x /opt/homebrew/bin/bash ]; then
+    echo "Homebrew bash is required at /opt/homebrew/bin/bash; without it the installer"
+    echo "tries to install bash mid-run and every scenario dies on the timeout."
+    echo "Fix: brew install bash"
+    exit 1
+fi
+
 WORK="$(mktemp -d)"
 STUB_LOG="$WORK/stub-calls.log"
 export STUB_LOG

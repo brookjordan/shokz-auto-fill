@@ -38,9 +38,10 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
-          brew install bash jq || true
+          brew install bash jq
+          test -x /opt/homebrew/bin/bash || { echo "bash missing after install"; exit 1; }
           command -v jq
-          test -x /opt/homebrew/bin/bash && /opt/homebrew/bin/bash --version | head -1
+          /opt/homebrew/bin/bash --version | head -1
 
       - name: tests
         run: bash tests/run.sh
