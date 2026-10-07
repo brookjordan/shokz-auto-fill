@@ -37,7 +37,7 @@ fi
 # ------------------------------------------------------------- what is installed
 CUR_DEVICE=""
 CUR_URLS=""
-CUR_USER="$(id -un)"
+CUR_USER=""
 CUR_PASS=""
 CUR_SONGS="50"
 HAVE_CONFIG=0
@@ -47,7 +47,7 @@ if [ -r "$CONFIG" ]; then
     . "$CONFIG"
     CUR_DEVICE="${DEVICE_NAME:-}"
     CUR_URLS="${ND_URLS:-}"
-    CUR_USER="${ND_USER:-$(id -un)}"
+    CUR_USER="${ND_USER:-}"
     CUR_PASS="${ND_PASS:-}"
     CUR_SONGS="${SONG_COUNT:-50}"
 fi
@@ -157,9 +157,19 @@ fi
 # ------------------------------------------------------------------ the login
 if [ "$DO_LOGIN" = 1 ]; then
     say "--- Navidrome login ---"
-    printf 'Username [%s]: ' "$CUR_USER"
+    # The Navidrome account is not necessarily the macOS account, so there is no
+    # sensible default from `id -un`. Ask rather than guess.
+    if [ -n "$CUR_USER" ]; then
+        printf 'Username [%s]: ' "$CUR_USER"
+    else
+        printf 'Username: '
+    fi
     read -r ND_USER || true
     [ -n "${ND_USER:-}" ] || ND_USER="$CUR_USER"
+    while [ -z "${ND_USER:-}" ]; do
+        printf 'A Navidrome username is required. Username: '
+        read -r ND_USER || true
+    done
 
     ND_PASS=""
     if [ -n "$CUR_PASS" ]; then
@@ -171,14 +181,9 @@ if [ "$DO_LOGIN" = 1 ]; then
         esac
     fi
     if [ -z "$ND_PASS" ]; then
-        printf 'Password for %s (not echoed): ' "$ND_USER"
+        printf 'Password for %s (not echoed, will be checked): ' "$ND_USER"
         read -r -s ND_PASS || true
         printf '\n'
-        printf 'Confirm password: '
-        read -r -s ND_PASS2 || true
-        printf '\n'
-        [ "$ND_PASS" = "$ND_PASS2" ] || die "Passwords did not match."
-        unset ND_PASS2
     fi
     [ -n "${ND_PASS:-}" ] || die "A password is required."
     say ""
@@ -205,18 +210,44 @@ esac
 if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
     say "--- Checking the URL(s) and login ---"
     WORKING_URL=""
-    for u in $ND_URLS; do
-        u="${u%/}"
-        st="$(subsonic_ping "$u" "$ND_USER" "$ND_PASS" 8 || true)"
-        if [ -z "$st" ]; then
-            say "  unreachable : $u"
-        elif [ "$st" = "ok" ]; then
-            say "  OK          : $u (authenticated)"
-            [ -n "$WORKING_URL" ] || WORKING_URL="$u"
-        else
-            say "  reachable   : $u (Subsonic status='$st' - check the login)"
-            [ -n "$WORKING_URL" ] || WORKING_URL="$u"
+    AUTH_OK=0
+    while :; do
+        AUTH_OK=0
+        WORKING_URL=""
+        for u in $ND_URLS; do
+            u="${u%/}"
+            st="$(subsonic_ping "$u" "$ND_USER" "$ND_PASS" 8 || true)"
+            if [ -z "$st" ]; then
+                say "  unreachable : $u"
+            elif [ "$st" = "ok" ]; then
+                say "  OK          : $u (authenticated)"
+                AUTH_OK=1
+                [ -n "$WORKING_URL" ] || WORKING_URL="$u"
+            else
+                say "  rejected    : $u (Subsonic status='$st')"
+                [ -n "$WORKING_URL" ] || WORKING_URL="$u"
+            fi
+        done
+        # Reachable but rejected means the URL is right and the login is not, which
+        # is worth fixing now rather than after the whole run.
+        if [ -n "$WORKING_URL" ] && [ "$AUTH_OK" = 0 ]; then
+            warn "a server answered, so the URL is right, but it rejected that login."
+            printf 'Re-enter the login now? [Y/n]: '
+            read -r ans || true
+            case "${ans:-Y}" in
+                [Nn]*) break ;;
+            esac
+            printf 'Username [%s]: ' "$ND_USER"
+            read -r _newuser || true
+            [ -n "${_newuser:-}" ] && ND_USER="$_newuser"
+            printf 'Password (not echoed): '
+            read -r -s ND_PASS || true
+            printf '\n'
+            [ -n "${ND_PASS:-}" ] || warn "empty password"
+            say ""
+            continue
         fi
+        break
     done
     if [ -z "$WORKING_URL" ]; then
         warn "no configured URL answered."
