@@ -10,6 +10,9 @@ background job from writing to a removable volume** unless you know why. That
 rule and its fix are documented below, because it is the whole reason this
 installer is more than `cp` and a plist.
 
+> **Read this in a browser:** `docs.html` is a self-contained HTML version of this
+> documentation — no external assets, no network, no build step. Open it directly.
+
 ## Requirements
 
 - macOS
