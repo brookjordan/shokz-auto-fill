@@ -1,0 +1,23 @@
+# Shokz Auto-Fill configuration - EXAMPLE
+#
+# The installer writes the real file to:
+#     ~/.config/shokz-auto-fill/config      (mode 600)
+#
+# This example is committed; the real file never is. It contains a credential.
+# You normally do not need to edit it by hand - run install.command instead.
+
+# The player's volume name, i.e. the folder that appears under /Volumes.
+DEVICE_NAME="SWIM PRO"
+
+# Navidrome base URL(s), tried in order until one answers. Space-separated.
+# Put the fastest first (a LAN address), then anything that works remotely.
+ND_URLS="http://navidrome.local:4533 https://music.example.com"
+
+ND_USER="your-navidrome-username"
+ND_PASS="your-navidrome-password"
+
+# How many random songs each fill downloads.
+SONG_COUNT=50
+
+# Per-request network timeout, seconds.
+CONNECT_TIMEOUT=8

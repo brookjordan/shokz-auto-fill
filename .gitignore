@@ -1,0 +1,12 @@
+# The real config contains a Navidrome password and must never be committed.
+# The installer writes it to ~/.config/shokz-auto-fill/config, but ignore it here
+# too so a stray copy in the repo cannot be committed by accident.
+config/config
+*.local
+.env
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
