@@ -1,0 +1,32 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash syntax
+        run: |
+          for f in install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh; do
+            bash -n "$f"
+          done
+
+      - name: shellcheck
+        run: shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh
+
+  installer:
+    name: installer tests
+    # macOS, because the installer calls diskutil, plutil and codesign, and the
+    # tests stub launchctl rather than mocking the whole platform.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tests
+        run: bash tests/run.sh

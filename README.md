@@ -206,6 +206,28 @@ Two ways to handle it:
 If the job ever stops filling for no visible reason, check the log for
 `Operation not permitted` and re-run the installer.
 
+## Checks
+
+Both run on every push, and both are cheap enough to run before committing:
+
+```sh
+bash tests/run.sh
+shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh
+```
+
+`tests/run.sh` drives `install.command` end to end against fake Navidrome servers and a
+stub `launchctl`. It covers the two defects that have shipped here: a device name
+containing a space being split into two menu entries, and exhausted input making the
+question loop spin forever. Every run is bounded by a timeout, so a prompt loop fails the
+test rather than hanging it.
+
+The tests never touch the real launchd domain. `HOME` is a throwaway directory and the
+stub `launchctl` is first on `PATH`, which is the lesson from a test that once unloaded a
+real agent.
+
+Not covered yet: the fill script's own logic. Its numbered-folder and download paths need
+a mounted volume, so `bin/auto_fill_shokz.sh` gets syntax and lint only.
+
 ## Security
 
 - The Navidrome password lives in `~/.config/shokz-auto-fill/config`, mode 600.

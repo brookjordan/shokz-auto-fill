@@ -163,8 +163,17 @@ echo "Got ${SONG_ID_COUNT} song id(s)."
 
 mkdir -p "$AUTO_DIR"
 
-LAST_NUM=$(ls "$AUTO_DIR" 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
-if [ -z "$LAST_NUM" ]; then LAST_NUM=0; fi
+# Numeric folder names only. A glob avoids `ls | grep`, which mangles names
+# containing spaces.
+LAST_NUM=0
+for _d in "$AUTO_DIR"/*; do
+    [ -d "$_d" ] || continue
+    _n=${_d##*/}
+    case "$_n" in
+        ''|*[!0-9]*) continue ;;
+    esac
+    [ "$_n" -gt "$LAST_NUM" ] && LAST_NUM="$_n"
+done
 NEXT_NUM=$((LAST_NUM + 1))
 
 NEW_DIR="$AUTO_DIR/$NEXT_NUM"
@@ -212,11 +221,23 @@ fi
 
 echo "Cleaning up old lists (keeping 2 newest)..."
 cd "$AUTO_DIR" || abort "Could not cd to ${AUTO_DIR}"
-ls | grep -E '^[0-9]+$' | sort -nr | tail -n +3 | while read -r dir; do
-    echo "Removing $dir"
-    rm -rf "$dir"
+# Numeric names only, newest two kept. Every entry is validated as digits, so the
+# word-split below cannot break on a name containing spaces.
+_old=""
+for _d in *; do
+    [ -d "$_d" ] || continue
+    case "$_d" in
+        ''|*[!0-9]*) continue ;;
+    esac
+    _old="$_old $_d"
 done
-cd ~ || true
+# shellcheck disable=SC2086  # digits-only entries, split on purpose
+printf '%s\n' $_old | sort -nr | tail -n +3 | while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    echo "Removing $dir"
+    rm -rf -- "$dir"
+done
+cd "$HOME" || true
 
 echo "Syncing and ejecting..."
 sync

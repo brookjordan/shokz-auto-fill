@@ -9,6 +9,7 @@ APP_NAME="Shokz Auto-Fill"
 LABEL="local.shokz-auto-fill"
 
 SUPPORT="$HOME/Library/Application Support/ShokzAutoFill"
+# shellcheck disable=SC2034  # part of this library's interface; used by callers
 SCRIPT_DEST="$SUPPORT/bin/auto_fill_shokz.sh"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 CONFIG_DIR="$HOME/.config/shokz-auto-fill"
@@ -417,6 +418,7 @@ read_secret() {
     stty icanon 2>/dev/null || true
     printf '\n' >&2
     if [ "$rc" -ne 0 ]; then return "$rc"; fi
-    SECRET_VALUE="$STEP_VALUE"
+    # shellcheck disable=SC2034  # the caller reads this after read_secret
+SECRET_VALUE="$STEP_VALUE"
     return 0
 }
