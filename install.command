@@ -208,30 +208,58 @@ esac
 
 # ------------------------------------------- verify (only when it can matter)
 if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
-    say "--- Checking the URL(s) and login ---"
-    WORKING_URL=""
-    AUTH_OK=0
+    say "--- Checking every configured URL ---"
+    n_total=0
+    n_ok=0
+    n_reach=0
+    dead=""
     while :; do
-        AUTH_OK=0
-        WORKING_URL=""
+        n_total=0
+        n_ok=0
+        n_reach=0
+        dead=""
         for u in $ND_URLS; do
             u="${u%/}"
+            n_total=$((n_total + 1))
             st="$(subsonic_ping "$u" "$ND_USER" "$ND_PASS" 8 || true)"
             if [ -z "$st" ]; then
-                say "  unreachable : $u"
+                say "  no answer : $u"
+                dead="$dead $u"
             elif [ "$st" = "ok" ]; then
-                say "  OK          : $u (authenticated)"
-                AUTH_OK=1
-                [ -n "$WORKING_URL" ] || WORKING_URL="$u"
+                say "  ok        : $u (authenticated)"
+                n_ok=$((n_ok + 1))
+                n_reach=$((n_reach + 1))
             else
-                say "  rejected    : $u (Subsonic status='$st')"
-                [ -n "$WORKING_URL" ] || WORKING_URL="$u"
+                say "  rejected  : $u (Subsonic status='$st')"
+                n_reach=$((n_reach + 1))
             fi
         done
-        # Reachable but rejected means the URL is right and the login is not, which
-        # is worth fixing now rather than after the whole run.
-        if [ -n "$WORKING_URL" ] && [ "$AUTH_OK" = 0 ]; then
-            warn "a server answered, so the URL is right, but it rejected that login."
+        say "  ${n_ok} of ${n_total} authenticated."
+
+        if [ "$n_ok" -gt 0 ] && [ -z "$dead" ]; then
+            break
+        fi
+
+        if [ "$n_ok" -gt 0 ]; then
+            # Something works but part of the list does not, and a broken fallback is
+            # only discovered on the day the working URL goes away.
+            warn "these URLs did not answer:${dead}"
+            printf 'Edit the URL list now? [y/N]: '
+            read -r ans || true
+            case "${ans:-N}" in
+                [Yy]*) ;;
+                *) break ;;
+            esac
+            printf 'URL(s): '
+            read -r _urls || true
+            if [ -n "${_urls:-}" ]; then ND_URLS="$(printf '%s' "$_urls" | tr ',' ' ')"; fi
+            say ""
+            continue
+        fi
+
+        if [ "$n_reach" -gt 0 ]; then
+            # A host answered, so the addresses are right and the login is not.
+            warn "a server answered but rejected the login."
             printf 'Re-enter the login now? [Y/n]: '
             read -r ans || true
             case "${ans:-Y}" in
@@ -240,18 +268,29 @@ if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
             printf 'Username [%s]: ' "$ND_USER"
             read -r _newuser || true
             [ -n "${_newuser:-}" ] && ND_USER="$_newuser"
-            printf 'Password (not echoed): '
+            printf 'Password (not echoed, will be checked): '
             read -r -s ND_PASS || true
             printf '\n'
             [ -n "${ND_PASS:-}" ] || warn "empty password"
             say ""
             continue
         fi
-        break
+
+        # Nothing answered at all, so the list itself is the problem.
+        warn "no configured URL answered:${ND_URLS}"
+        printf 'Re-enter the URL list? [Y/n]: '
+        read -r ans || true
+        case "${ans:-Y}" in
+            [Nn]*) break ;;
+        esac
+        printf 'URL(s): '
+        read -r _urls || true
+        if [ -n "${_urls:-}" ]; then ND_URLS="$(printf '%s' "$_urls" | tr ',' ' ')"; fi
+        say ""
     done
-    if [ -z "$WORKING_URL" ]; then
-        warn "no configured URL answered."
-        printf 'Continue anyway so you can fix it later? [y/N]: '
+
+    if [ "$n_ok" -eq 0 ]; then
+        printf 'No URL was verified. Install anyway so you can fix it later? [y/N]: '
         read -r ans || true
         case "${ans:-N}" in [Yy]*) : ;; *) die "Aborted at your request." ;; esac
     fi

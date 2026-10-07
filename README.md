@@ -27,7 +27,7 @@ It asks for:
 | Prompt | Notes |
 | --- | --- |
 | **Device** | The volume name, i.e. the folder under `/Volumes`. Currently mounted volumes are listed with numbers, so you can pick one. |
-| **Navidrome URL(s)** | One or more, space- or comma-separated, tried in order until one answers. Put a LAN address first for speed, then a remote one. |
+| **Navidrome URL(s)** | One or more, space- or comma-separated, tried in order at fill time. Put a LAN address first for speed, then a remote one. Every URL is checked during install, because a dead fallback is worth finding now rather than on the day the working one goes away. |
 | **Username / password** | Your Navidrome username, which need not match your macOS account. The password is not echoed and is checked against the server straight away, so it is asked for once rather than twice. A rejected login can be corrected without starting over. |
 | **Songs per fill** | Default 50. |
 

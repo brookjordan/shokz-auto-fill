@@ -274,10 +274,13 @@
         </table>
       </div>
 
-      <p>Each URL is then checked against the server, and reported as:</p>
-      <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>unreachable : http://navidrome.local:4533
-OK          : http://100.64.0.7:4533 (authenticated)
-reachable   : https://music.example.com (Subsonic status='failed' - check the login)</code></pre></div>
+      <p>Every configured URL is checked, and each one is reported:</p>
+      <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>no answer : http://navidrome.local:4533
+ok        : http://100.64.0.7:4533 (authenticated)
+rejected  : https://music.example.com (Subsonic status='failed')
+1 of 3 authenticated.</code></pre></div>
+
+      <p>A URL that did not answer can be edited on the spot, and a rejected login re-entered without restarting.</p>
 
       <div class="callout ok">
         <p class="t">A wrong password is caught, not ignored</p>
