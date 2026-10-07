@@ -459,9 +459,9 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
       </div>
 
       <div class="callout danger">
-        <p class="t">Do not change the interpreter back to /bin/bash</p>
+        <p class="t">Do not point the interpreter at /bin/bash</p>
         <p>The installed script's shebang is rewritten to the resolved Homebrew bash. Pointing the agent
-          at <code>/bin/bash</code>, or trimming the shebang back, brings the denial straight back.</p>
+          at <code>/bin/bash</code> restores the denial.</p>
       </div>
     </section>
 
@@ -469,14 +469,13 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
     <section id="caveat">
       <h2><span class="num">07</span>Keeping the permission working</h2>
       <p>For an unsigned binary, macOS keys the grant by path, and it resolves symlinks. The grant
-        therefore binds to a versioned Cellar path such as
-        <code>/opt/homebrew/Cellar/bash/5.3.20/bin/bash</code>, and your own will carry a
-        different version.</p>
+        therefore binds to a versioned Homebrew path, so upgrading bash moves it and the grant is
+        lost.</p>
 
       <div class="callout warn">
         <p class="t">A <code>brew upgrade bash</code> breaks the job</p>
-        <p>The path moves to <code>…/bash/5.3.21/…</code>, the grant no longer applies, and fills fail
-          exactly as before. Two ways to handle it:</p>
+        <p>The grant does not apply to the new path, and fills fail exactly as before. Two ways to
+          handle it:</p>
         <ul>
           <li><strong>Re-run <code>install.command</code></strong> after upgrading bash, by choosing option 5. It repeats
             the permission probe, so the prompt returns and the grant is re-created. <em>Default advice.</em></li>

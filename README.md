@@ -154,16 +154,14 @@ Publishing <TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableVolu
             identifier_type=Path, identifier=/opt/homebrew/Cellar/bash/5.3.20/bin/bash>
 ```
 
-Hence `brew install bash` and the shebang `#!/opt/homebrew/bin/bash`. **Do not
-change it back to `/bin/bash`.**
+Hence `brew install bash` and the shebang `#!/opt/homebrew/bin/bash`. Do not point
+the agent at `/bin/bash`.
 
 ### The catch: the grant is keyed by path
 
-For an unsigned binary macOS keys the grant by **path**, and it resolves
-symlinks. So the grant binds to a versioned Cellar path like
-`/opt/homebrew/Cellar/bash/5.3.20/bin/bash`, and your own will carry a different
-version. A `brew upgrade bash` moves that path and **the grant is silently lost**,
-after which the job fails as before.
+For an unsigned binary macOS keys the grant by **path**, and it resolves symlinks.
+The grant therefore binds to a versioned Homebrew path, so `brew upgrade bash`
+moves it, the grant is lost, and the job fails as before.
 
 Two ways to handle it:
 
