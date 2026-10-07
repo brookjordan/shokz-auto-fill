@@ -322,10 +322,10 @@ reachable   : https://music.example.com (Subsonic status='failed' - check the lo
       <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>An existing installation was found.
   config : ~/.config/shokz-auto-fill/config
   script : present
-  agent  : loaded  (com.brookjordan.shokz-auto-fill)
+  agent  : loaded  (local.shokz-auto-fill)
 
 Current settings:
-  device     : SWIM PRO
+  device     : MY_PLAYER
   url(s)     : http://navidrome.local:4533 https://music.example.com
   login      : youruser   password: stored
   songs/fill : 50
@@ -333,8 +333,8 @@ Current settings:
 What would you like to update?  (one number, several separated by spaces, or 'a')
   1) song count          (now 50)
   2) Navidrome URL(s)
-  3) device              (now SWIM PRO)
-  4) login               (now brookjordan)
+  3) device              (now MY_PLAYER)
+  4) login               (now youruser)
   5) reinstall script + LaunchAgent, and re-request volume permission
   a) all of the above
   q) quit without changing anything
@@ -373,7 +373,7 @@ Choice [a]:</code></pre></div>
 
       <div class="callout">
         <p class="t">Test a run on demand</p>
-        <div class="codewrap" style="margin:8px 0 0"><button class="copy" type="button">Copy</button><pre><code>launchctl kickstart -k gui/$(id -u)/com.brookjordan.shokz-auto-fill
+        <div class="codewrap" style="margin:8px 0 0"><button class="copy" type="button">Copy</button><pre><code>launchctl kickstart -k gui/$(id -u)/local.shokz-auto-fill
 tail -f /tmp/shokz-auto-fill.log</code></pre></div>
       </div>
     </section>
@@ -387,14 +387,13 @@ tail -f /tmp/shokz-auto-fill.log</code></pre></div>
           <tbody>
             <tr><td><code>~/Library/Application Support/ShokzAutoFill/bin/auto_fill_shokz.sh</code></td><td>the fill script</td></tr>
             <tr><td><code>~/.config/shokz-auto-fill/config</code></td><td>device, URLs and credentials, mode 600</td></tr>
-            <tr><td><code>~/Library/LaunchAgents/com.brookjordan.shokz-auto-fill.plist</code></td><td>runs the script when <code>/Volumes</code> changes</td></tr>
+            <tr><td><code>~/Library/LaunchAgents/local.shokz-auto-fill.plist</code></td><td>runs the script when <code>/Volumes</code> changes</td></tr>
             <tr><td><code>/tmp/shokz-auto-fill.log</code></td><td>the job's own log, trimmed to the last 1000 lines</td></tr>
           </tbody>
         </table>
       </div>
-      <p>The installer also retires the older layout. It unloads the legacy agent
-        <code>com.n8n.swimpro</code> and parks <code>io.shokz.auto-fill.plist</code> as
-        <code>.disabled</code>, so two agents do not compete for the same device.</p>
+      <p>Re-running the installer replaces the agent with the current one, so there is
+        never more than one job watching <code>/Volumes</code>.</p>
     </section>
 
     <!-- ============ TRAP ============ -->
@@ -410,10 +409,10 @@ tail -f /tmp/shokz-auto-fill.log</code></pre></div>
       <div class="term">
         <div class="bar"><i></i><i></i><i></i><span>shokz-auto-fill.log</span></div>
 <pre>Got 50 song id(s).
-Downloading to /Volumes/SWIM PRO/auto-list/1...
-<span class="hl">mkdir: /Volumes/SWIM PRO/auto-list/1: Operation not permitted</span>
-Downloaded file count in /Volumes/SWIM PRO/auto-list/1: 0
-ABORT: All downloads failed against Tailscale.</pre>
+Downloading to /Volumes/MY_PLAYER/auto-list/1...
+<span class="hl">mkdir: /Volumes/MY_PLAYER/auto-list/1: Operation not permitted</span>
+Downloaded file count in /Volumes/MY_PLAYER/auto-list/1: 0
+ABORT: All downloads failed against http://navidrome.local:4533.</pre>
       </div>
 
       <h3>Cause</h3>
@@ -523,7 +522,7 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
             <tr><td><code>Operation not permitted</code> in the log</td><td>The removable-volume grant is missing. Re-run <code>install.command</code> and allow the dialog.</td></tr>
             <tr><td>Reaches the server, downloads 0 files</td><td>Check <code>ND_USER</code> / <code>ND_PASS</code>; the log prints the Subsonic status.</td></tr>
             <tr><td>Partial numbered folder left behind</td><td>A run was interrupted. Delete the half-written folder on the device.</td></tr>
-            <tr><td><code>launchctl list &lt;label&gt;</code> says "could not find service"</td><td>Current label is <code>com.brookjordan.shokz-auto-fill</code>. Older installs used <code>com.n8n.swimpro</code> for a plist named <code>io.shokz.auto-fill.plist</code>; the installer migrates that.</td></tr>
+            <tr><td><code>launchctl list &lt;label&gt;</code> says "could not find service"</td><td>The label is <code>local.shokz-auto-fill</code>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -544,10 +543,9 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
         </div>
         <div class="card">
           <h4>Rotate the old password</h4>
-          <p>The password this replaces was stored in <strong>plain text</strong> in
-            <code>~/.bin/scripts/auto_fill_shokz.sh</code>, and that file was committed to a git
-            repository, so treat it as exposed and change it on the server. Once the installer has
-            migrated to the config, delete that line.</p>
+          <p>If you are migrating from an older setup that kept the password in plain text inside
+            a script, and that script was committed to git, treat the password as exposed.
+            Rotate it on the server, then re-run the installer to store the new one here.</p>
         </div>
       </div>
     </section>

@@ -4,11 +4,9 @@
 
 APP_NAME="Shokz Auto-Fill"
 
-# launchd identity. The repo uses one canonical label; the legacy label from the
-# original machine is migrated away from during install.
-LABEL="com.brookjordan.shokz-auto-fill"
-LEGACY_LABEL="com.n8n.swimpro"
-LEGACY_PLIST="$HOME/Library/LaunchAgents/io.shokz.auto-fill.plist"
+# launchd identity. The installer replaces any earlier version of this agent, so
+# there is only ever one job watching /Volumes.
+LABEL="local.shokz-auto-fill"
 
 SUPPORT="$HOME/Library/Application Support/ShokzAutoFill"
 SCRIPT_DEST="$SUPPORT/bin/auto_fill_shokz.sh"

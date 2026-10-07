@@ -7,7 +7,7 @@
 # You normally do not need to edit it by hand - run install.command instead.
 
 # The player's volume name, i.e. the folder that appears under /Volumes.
-DEVICE_NAME="SWIM PRO"
+DEVICE_NAME="MY_PLAYER"
 
 # Navidrome base URL(s), tried in order until one answers. Space-separated.
 # Put the fastest first (a LAN address), then anything that works remotely.

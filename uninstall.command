@@ -51,13 +51,6 @@ if [ -f "$CONFIG" ]; then
     esac
 fi
 
-# Clean up any leftovers from the older layout on the original machine.
-[ -f "$LEGACY_PLIST" ] && { rm -f "$LEGACY_PLIST"; say "removed $LEGACY_PLIST"; }
-if [ -f "$LEGACY_PLIST.disabled" ]; then
-    printf 'Remove the parked legacy plist (%s.disabled)? [Y/n]: ' "$LEGACY_PLIST"
-    read -r ans || true
-    case "${ans:-Y}" in [Nn]*) : ;; *) rm -f "$LEGACY_PLIST.disabled"; say "removed parked legacy plist" ;; esac
-fi
 
 say ""
 say "=== Done ==="

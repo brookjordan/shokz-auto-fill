@@ -55,8 +55,6 @@ HAVE_SCRIPT=0; [ -x "$SCRIPT_DEST" ] && HAVE_SCRIPT=1
 HAVE_PLIST=0;  [ -f "$PLIST_DEST" ]  && HAVE_PLIST=1
 AGENT_LOADED=0
 launchctl list "$LABEL" >/dev/null 2>&1 && AGENT_LOADED=1
-LEGACY_LOADED=0
-launchctl list "$LEGACY_LABEL" >/dev/null 2>&1 && LEGACY_LOADED=1
 
 INSTALLED=0
 { [ "$HAVE_CONFIG" = 1 ] || [ "$HAVE_PLIST" = 1 ] || [ "$HAVE_SCRIPT" = 1 ]; } && INSTALLED=1
@@ -189,22 +187,6 @@ if [ "$DO_LOGIN" = 1 ]; then
             *) ND_PASS="$CUR_PASS"; say "  -> keeping the stored password" ;;
         esac
     fi
-    # Offer to migrate a credential from an older install rather than retyping it.
-    LEGACY_SCRIPT="$HOME/.bin/scripts/auto_fill_shokz.sh"
-    if [ -z "$ND_PASS" ] && [ -r "$LEGACY_SCRIPT" ]; then
-        # Handles single- and double-quoted assignments; the original used single
-        # quotes, which a naive sed for ND_PASS="..." silently fails to match.
-        OLD_PASS="$(awk 'NR<=40 { eq=index($0,"="); if (eq>0 && substr($0,1,eq-1)=="ND_PASS") { print substr($0,eq+1); exit } }' "$LEGACY_SCRIPT" | tr -d "\"'")"
-        if [ -n "${OLD_PASS:-}" ]; then
-            printf 'Found a password in %s. Use it? [Y/n]: ' "$LEGACY_SCRIPT"
-            read -r ans || true
-            case "${ans:-Y}" in
-                [Nn]*) : ;;
-                *) ND_PASS="$OLD_PASS"; say "  -> using it (not displayed)" ;;
-            esac
-        fi
-        unset OLD_PASS
-    fi
     if [ -z "$ND_PASS" ]; then
         printf 'Password for %s (not echoed): ' "$ND_USER"
         read -r -s ND_PASS || true
@@ -332,15 +314,6 @@ EOF
     chmod 644 "$PLIST_DEST"
     say "  wrote $PLIST_DEST"
 
-    # Retire the legacy agent from the original machine's layout.
-    if [ "$LEGACY_LOADED" = 1 ]; then
-        launchctl bootout "gui/$(id -u)/$LEGACY_LABEL" 2>/dev/null || true
-        say "  unloaded legacy agent $LEGACY_LABEL"
-    fi
-    if [ -f "$LEGACY_PLIST" ]; then
-        mv "$LEGACY_PLIST" "$LEGACY_PLIST.disabled" 2>/dev/null \
-            && say "  parked legacy plist -> $LEGACY_PLIST.disabled"
-    fi
 
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null \

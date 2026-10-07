@@ -47,19 +47,19 @@ is configured, and asks what to change:
 An existing installation was found.
   config : ~/.config/shokz-auto-fill/config
   script : present
-  agent  : loaded  (com.brookjordan.shokz-auto-fill)
+  agent  : loaded  (local.shokz-auto-fill)
 
 Current settings:
-  device     : SWIM PRO
+  device     : MY_PLAYER
   url(s)     : http://navidrome.local:4533 https://music.example.com
-  login      : brookjordan   password: stored
+  login      : youruser   password: stored
   songs/fill : 50
 
 What would you like to update?  (one number, several separated by spaces, or 'a')
   1) song count          (now 50)
   2) Navidrome URL(s)
-  3) device              (now SWIM PRO)
-  4) login               (now brookjordan)
+  3) device              (now MY_PLAYER)
+  4) login               (now youruser)
   5) reinstall script + LaunchAgent, and re-request volume permission
   a) all of the above
   q) quit without changing anything
@@ -89,13 +89,13 @@ the password). Music already on the device is never touched.
 | --- | --- |
 | `~/Library/Application Support/ShokzAutoFill/bin/auto_fill_shokz.sh` | the fill script |
 | `~/.config/shokz-auto-fill/config` | device, URLs, credentials (**mode 600**) |
-| `~/Library/LaunchAgents/com.brookjordan.shokz-auto-fill.plist` | runs the script when `/Volumes` changes |
+| `~/Library/LaunchAgents/local.shokz-auto-fill.plist` | runs the script when `/Volumes` changes |
 | `/tmp/shokz-auto-fill.log` | the job's own log, trimmed to the last 1000 lines |
 
 Run it as soon as the device is mounted:
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/com.brookjordan.shokz-auto-fill
+launchctl kickstart -k gui/$(id -u)/local.shokz-auto-fill
 tail -f /tmp/shokz-auto-fill.log
 ```
 
@@ -121,7 +121,7 @@ job has to be able to ask for. This section is the reference for that.
 every `mkdir` on the device fails:
 
 ```
-mkdir: /Volumes/SWIM PRO/auto-list/1: Operation not permitted
+mkdir: /Volumes/MY_PLAYER/auto-list/1: Operation not permitted
 ```
 
 **Cause.** macOS gates removable volumes behind the TCC service
@@ -180,12 +180,10 @@ If the job ever stops filling for no visible reason, check the log for
   It is **not** in this repo, and `config/config` is git-ignored as a backstop.
 - The script builds a Subsonic token as `md5(password + salt)` per request rather
   than sending the password, and never prints it.
-- The password it replaces was previously stored **in plain text inside
-  `~/.bin/scripts/auto_fill_shokz.sh`**. That copy still exists if you have not
-  removed it, and because that file was committed to a git repository, **the
-  password should be considered exposed and rotated** on the Navidrome server.
-  Once rotated, update this config by re-running the installer, then delete the old line
-  from that script.
+- If you are migrating from an older setup that kept the password in plain text inside
+  a script, and that script was committed to git, treat the password as exposed.
+  Rotate it on the Navidrome server, then re-run the installer to store the new one
+  here.
 
 ## Troubleshooting
 
@@ -195,4 +193,4 @@ If the job ever stops filling for no visible reason, check the log for
 | `Operation not permitted` in the log | The removable-volume grant is missing. Re-run `install.command` and allow the dialog. |
 | Reaches the server but downloads 0 files | Check `ND_USER` / `ND_PASS`; the log prints the Subsonic status. |
 | Fills, then leaves a partial folder | A run was interrupted. Delete the half-written numbered folder on the device. |
-| `launchctl list <label>` says "could not find service" | The label is `com.brookjordan.shokz-auto-fill`. Older installs used `com.n8n.swimpro` for a plist named `io.shokz.auto-fill.plist`; this installer migrates that. |
+| `launchctl list <label>` says "could not find service" | The label is `local.shokz-auto-fill`. |
