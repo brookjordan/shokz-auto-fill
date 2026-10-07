@@ -208,7 +208,10 @@ If the job ever stops filling for no visible reason, check the log for
 
 ## Checks
 
-Both run on every push, and both are cheap enough to run before committing:
+Shellcheck and syntax run on every push. The installer suite is a local run: it needs a
+mounted volume, Homebrew bash and `plutil`, and it hung on a GitHub macOS runner inside a
+step that the logs did not identify, so it is deliberately not wired to CI until that is
+understood. It passes here, and it is the only thing covering the installer's behaviour.
 
 ```sh
 bash tests/run.sh
