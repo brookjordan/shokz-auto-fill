@@ -363,20 +363,24 @@ _read_core() {
         if [ "$rc" -ne 0 ] && [ -z "$first" ]; then return 2; fi
         case "$first" in
             $'\e')
-                # Arrows and function keys also begin with ESC. Drain and ignore
-                # those, so only a bare Escape means "go back".
+                # Every arrow key starts with ESC. In a plain read the shell is not
+                # using them, so up can mean back and down can mean forward. Any
+                # other escape sequence is drained and ignored.
                 stty -icanon min 0 time 0 2>/dev/null || true
                 IFS= read -rn1 nxt 2>/dev/null || true
-                stty icanon 2>/dev/null || true
                 case "$nxt" in
                     '['|'O')
-                        stty -icanon min 0 time 0 2>/dev/null || true
                         IFS= read -rn1 nxt 2>/dev/null || true
-                        IFS= read -rn1 nxt 2>/dev/null || true
-                        stty icanon 2>/dev/null || true
-                        continue ;;
-                    '') return 1 ;;
-                    *)  return 1 ;;
+                        case "$nxt" in
+                            A) stty icanon 2>/dev/null || true; return 1 ;;
+                            B) stty icanon 2>/dev/null || true; return 3 ;;
+                            *)
+                                stty -icanon min 0 time 1 2>/dev/null || true
+                                while IFS= read -rn1 nxt 2>/dev/null; do :; done
+                                stty icanon 2>/dev/null || true
+                                continue ;;
+                        esac ;;
+                    *) stty icanon 2>/dev/null || true; return 1 ;;
                 esac ;;
             $'\x03'|$'\x04') return 2 ;;
         esac

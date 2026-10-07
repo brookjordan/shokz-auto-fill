@@ -24,9 +24,10 @@ Double-click **`install.command`** (or run `./install.command`).
 
 It asks for:
 
-**Escape goes back one step and Ctrl-C cancels.** Every answer is held in its own
-variable, so stepping back never costs you something you typed later, and walking
-forward again offers what you had.
+**Up or Escape goes back a question, Down moves forward to one you have already
+answered, and Ctrl-C cancels.** Every answer is held in its own variable, so stepping
+back never costs you something you typed later, and walking forward again offers what
+you had.
 
 | Prompt | Notes |
 | --- | --- |

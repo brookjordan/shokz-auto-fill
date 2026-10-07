@@ -152,7 +152,8 @@ fi
 # Every question is a step. Escape goes back one, Ctrl-C cancels, and each answer
 # lives in its own variable, so stepping back never costs a later answer.
 
-say "Answer the following questions. Escape goes back one step, Ctrl-C cancels."
+say "Up or Escape goes back a question, Down moves forward to one you have already"
+say "answered, and Ctrl-C cancels."
 say ""
 
 DEVICE_NAME="$CUR_DEVICE"
@@ -169,6 +170,20 @@ STEPS=()
 [ "$DO_SONGS" = 1 ] && STEPS+=("songs")
 
 STEP_INDEX=0
+MAX_REACHED=-1
+
+# Down should only walk forward over questions already answered.
+step_has_value() {
+    case "$1" in
+        device)   [ -n "$DEVICE_NAME" ] ;;
+        urls)     [ -n "$ND_URLS" ] ;;
+        username) [ -n "$ND_USER" ] ;;
+        password) [ -n "$ND_PASS" ] ;;
+        songs)    [ -n "$SONG_COUNT" ] ;;
+        *)        return 0 ;;
+    esac
+}
+
 step_index_of() {
     local want="$1" k=0 s
     for s in "${STEPS[@]}"; do
@@ -263,6 +278,19 @@ ask_songs() {
     return 0
 }
 
+# For the "go back and fix it?" questions, Up means go back and Down means carry on,
+# which matches what those keys do everywhere else. 0 = go back, 1 = carry on.
+ask_fix_it() {
+    local prompt="$1" rc
+    read_step_raw "$prompt [Y/n]" "Y"; rc=$?
+    case "$rc" in
+        1) return 0 ;;
+        3) return 1 ;;
+        2) return 2 ;;
+    esac
+    case "$STEP_VALUE" in [Yy]*) return 0 ;; *) return 1 ;; esac
+}
+
 # Test every URL. Returns 0 to carry on, 3 to go back to the login, 4 to go back to
 # the URL list, 5 to abandon.
 CHECK_ATTEMPT=0
@@ -314,24 +342,26 @@ run_checks() {
         # Something works but part of the list does not, and a broken fallback is
         # only discovered on the day the working URL goes away.
         warn "these URLs did not answer:${dead}"
-        read_step_raw "Go back and edit the URL list? [Y/n]" "Y"; rc=$?
-        [ "$rc" -eq 0 ] || return 2
-        case "$STEP_VALUE" in [Nn]*) return 0 ;; *) return 4 ;; esac
+        ask_fix_it "Go back and edit the URL list?"; rc=$?
+        [ "$rc" -eq 2 ] && return 2
+        [ "$rc" -eq 0 ] && return 4
+        return 0
     fi
 
     if [ "$n_reach" -gt 0 ]; then
         warn "a server answered, so the addresses are right, but it rejected that login."
-        read_step_raw "Go back and fix the login? [Y/n]" "Y"; rc=$?
-        [ "$rc" -eq 0 ] || return 2
-        case "$STEP_VALUE" in [Nn]*) : ;; *) return 3 ;; esac
+        ask_fix_it "Go back and fix the login?"; rc=$?
+        [ "$rc" -eq 2 ] && return 2
+        [ "$rc" -eq 0 ] && return 3
     else
         warn "no configured URL answered:${ND_URLS}"
-        read_step_raw "Go back and edit the URL list? [Y/n]" "Y"; rc=$?
-        [ "$rc" -eq 0 ] || return 2
-        case "$STEP_VALUE" in [Nn]*) : ;; *) return 4 ;; esac
+        ask_fix_it "Go back and edit the URL list?"; rc=$?
+        [ "$rc" -eq 2 ] && return 2
+        [ "$rc" -eq 0 ] && return 4
     fi
 
     read_step_raw "Install anyway, to fix it later? [y/N]" "N"; rc=$?
+    case "$rc" in 1|3) rc=0 ;; esac
     [ "$rc" -eq 0 ] || return 2
     case "$STEP_VALUE" in [Yy]*) return 0 ;; *) return 5 ;; esac
 }
@@ -349,12 +379,19 @@ while :; do
             *)      rc=0 ;;
         esac
         if [ "$rc" -eq 0 ]; then
+            [ "$i" -gt "$MAX_REACHED" ] && MAX_REACHED="$i"
             i=$((i + 1))
         elif [ "$rc" -eq 1 ]; then
             if [ "$i" -gt 0 ]; then
                 i=$((i - 1))
             else
                 say "  this is the first question, so there is nothing to go back to"
+            fi
+        elif [ "$rc" -eq 3 ]; then
+            if [ "$i" -lt "$MAX_REACHED" ] || step_has_value "${STEPS[$i]}"; then
+                i=$((i + 1))
+            else
+                say "  no later question has been answered yet"
             fi
         else
             say ""
