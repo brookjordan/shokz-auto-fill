@@ -34,6 +34,19 @@ if ! command -v jq >/dev/null 2>&1; then
     HOMEBREW_NO_AUTO_UPDATE=1 brew install jq >/dev/null 2>&1 || die "brew install jq failed."
 fi
 
+# ------------------------------------------------------------------- logging
+# From here on, everything on screen is mirrored into a timestamped log, and the URL
+# checks add depth of their own. The log records the reasoning, not only results.
+log_init
+if [ -n "$SHOKZ_LOG" ]; then
+    log_env
+    exec 3>&1 4>&2
+    exec > >(tee -a "$SHOKZ_LOG") 2>&1
+    trap '_restore_output' EXIT
+else
+    say "could not create a log file; continuing without one"
+fi
+
 # ------------------------------------------------------------- what is installed
 CUR_DEVICE=""
 CUR_URLS=""
@@ -58,6 +71,14 @@ launchctl list "$LABEL" >/dev/null 2>&1 && AGENT_LOADED=1
 
 INSTALLED=0
 { [ "$HAVE_CONFIG" = 1 ] || [ "$HAVE_PLIST" = 1 ] || [ "$HAVE_SCRIPT" = 1 ]; } && INSTALLED=1
+
+log ""
+log "--- existing installation ---"
+log "config          : $([ "$HAVE_CONFIG" = 1 ] && echo present || echo missing)  $CONFIG"
+log "script          : $([ "$HAVE_SCRIPT" = 1 ] && echo present || echo missing)  $SCRIPT_DEST"
+log "plist           : $([ "$HAVE_PLIST" = 1 ] && echo present || echo missing)  $PLIST_DEST"
+log "agent loaded    : $AGENT_LOADED  ($LABEL)"
+log "=> treated as   : $([ "$INSTALLED" = 1 ] && echo 'existing install (update)' || echo 'fresh install')"
 
 # ---------------------------------------------------- choose what to update
 DO_DEVICE=1; DO_URLS=1; DO_LOGIN=1; DO_SONGS=1; DO_REFRESH=1
@@ -118,6 +139,10 @@ if [ "$INSTALLED" = 1 ]; then
     # Never leave the config without a password.
     if [ -z "$CUR_PASS" ]; then
         warn "no stored password found, so the login will be asked for as well"
+    log ""
+    log "--- what the user chose to update ---"
+    log "selection       : $sel"
+    log "device=$DO_DEVICE urls=$DO_URLS login=$DO_LOGIN songs=$DO_SONGS refresh=$DO_REFRESH"
         DO_LOGIN=1
     fi
     say ""
@@ -207,6 +232,14 @@ esac
 [ "$DO_SONGS" = 1 ] && { say "  -> $SONG_COUNT songs per fill"; say ""; }
 
 # ------------------------------------------- verify (only when it can matter)
+log ""
+log "--- settings gathered ---"
+log "device          : $DEVICE_NAME"
+log "urls            : $ND_URLS"
+log "username        : $ND_USER"
+log "password        : $([ -n "${ND_PASS:-}" ] && echo 'set, never logged' || echo MISSING)"
+log "songs per fill  : $SONG_COUNT"
+
 if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
     say "--- Checking every configured URL ---"
     n_total=0
@@ -221,7 +254,8 @@ if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
         for u in $ND_URLS; do
             u="${u%/}"
             n_total=$((n_total + 1))
-            st="$(subsonic_ping "$u" "$ND_USER" "$ND_PASS" 8 || true)"
+            st="$(diag_url "$u" "$ND_USER" "$ND_PASS" 8)"
+            log "    verdict      : ${st:-no answer}"
             if [ -z "$st" ]; then
                 say "  no answer : $u"
                 dead="$dead $u"
@@ -322,6 +356,11 @@ EOF
 chmod 600 "$CONFIG"
 say "config written: $CONFIG (mode 600)"
 
+log ""
+log "--- config written, password redacted ---"
+while IFS= read -r _ln; do log "  $_ln"; done < "$CONFIG"
+log "permissions     : $(stat -f '%Sp' "$CONFIG" 2>/dev/null)"
+
 # ---------------------------------------- install / refresh the script + agent
 if [ "$DO_REFRESH" = 1 ] || [ "$INSTALLED" = 0 ]; then
     say ""
@@ -329,6 +368,13 @@ if [ "$DO_REFRESH" = 1 ] || [ "$INSTALLED" = 0 ]; then
     ensure_non_platform_shell
     INTERP="$BREW_BASH"
     say "  using $INTERP (not a platform binary, so macOS can grant it access)"
+    log "interpreter     : $INTERP"
+    log "  codesign      : $(codesign -dvvv "$INTERP" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')"
+    if codesign -dvvv "$INTERP" 2>&1 | grep -qi 'Platform identifier'; then
+        log "  PLATFORM BINARY: yes, which TCC can never grant. This is a bug"
+    else
+        log "  platform binary: no, so macOS can prompt for it"
+    fi
 
     mkdir -p "$SUPPORT/bin"
     cp ./bin/auto_fill_shokz.sh "$SCRIPT_DEST"
@@ -367,15 +413,32 @@ EOF
     chmod 644 "$PLIST_DEST"
     say "  wrote $PLIST_DEST"
 
+    log ""
+    log "--- LaunchAgent written ---"
+    log "path            : $PLIST_DEST"
+    while IFS= read -r _ln; do log "  $_ln"; done < "$PLIST_DEST"
+    log "lint            : $(plutil -lint "$PLIST_DEST" 2>&1)"
+    log "permissions     : $(stat -f '%Sp' "$PLIST_DEST" 2>/dev/null)"
+    log "script sha256   : $(shasum -a 256 "$SCRIPT_DEST" 2>/dev/null | awk '{print $1}')"
+    log "script shebang  : $(head -1 "$SCRIPT_DEST" 2>/dev/null)"
+
 
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST" 2>/dev/null \
         || launchctl load "$PLIST_DEST" 2>/dev/null || true
     sleep 2
+    log ""
+    log "--- loading the agent ---"
+    log "bootout then bootstrap gui/$(id -u) $PLIST_DEST"
+
     if launchctl list "$LABEL" >/dev/null 2>&1; then
         say "  agent loaded: $LABEL"
+    log "  loaded        : yes"
+    log "  launchctl list: $(launchctl list "$LABEL" 2>&1 | tr '\n' ' ')"
     else
         warn "agent does not appear in launchctl; check: launchctl list | grep shokz"
+    log "  loaded        : NO, not present in launchctl"
+    log "  launchctl list: $(launchctl list "$LABEL" 2>&1 | tr '\n' ' ')"
     fi
 
     # ------------------------------------------------- permission probe
@@ -414,6 +477,13 @@ EOF
             i=$((i + 1))
         done
         RESULT="$(grep -oE 'OK|DENIED' "$PROBE_LOG" 2>/dev/null | head -1)"
+        log ""
+        log "--- permission probe ---"
+        log "probe label     : $PROBE_LABEL"
+        log "probe plist     : $PROBE_PLIST"
+        log "probe log       : $PROBE_LOG"
+        log "probe output    : $(cat "$PROBE_LOG" 2>/dev/null | tr '\n' ' ')"
+        log "probe result    : ${RESULT:-<no answer within 60s>}"
         launchctl bootout "gui/$(id -u)/$PROBE_LABEL" 2>/dev/null || true
         rm -f "$PROBE_PLIST"
         case "${RESULT:-}" in
@@ -442,7 +512,8 @@ say "  url(s)     : $ND_URLS"
 say "  login      : $ND_USER"
 say "  songs/fill : $SONG_COUNT"
 say "Agent    : $LABEL"
-say "Log      : /tmp/shokz-auto-fill.log"
+say "Log      : ${SHOKZ_LOG:-<none>}"
+say "Job log  : /tmp/shokz-auto-fill.log"
 say ""
 say "To test now:  launchctl kickstart -k gui/$(id -u)/$LABEL"
 pause_if_double_clicked

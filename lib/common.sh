@@ -44,21 +44,6 @@ ensure_non_platform_shell() {
     return 0
 }
 
-# Subsonic/Navidrome ping. Prints the subsonic status ("ok" / "failed") on
-# success, nothing on network failure. Credentials are never echoed.
-subsonic_ping() {
-    local url="$1" user="$2" pass="$3" t="${4:-8}"
-    local salt token body http
-    salt=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)
-    token=$(printf '%s' "${pass}${salt}" | md5)
-    body=$(curl -sS --connect-timeout "$t" -m "$t" -w '\n%{http_code}' \
-        "${url%/}/rest/ping.view?u=${user}&t=${token}&s=${salt}&v=1.12.0&c=bash&f=json" 2>/dev/null) || return 1
-    http=$(printf '%s' "$body" | tail -n 1)
-    body=$(printf '%s' "$body" | sed '$d')
-    [ "$http" = "200" ] || return 1
-    printf '%s' "$body" | jq -r '.["subsonic-response"].status // empty' 2>/dev/null
-}
-
 # List volume names under /Volumes, one per line. A name can contain spaces, so
 # callers must read this line by line. Word-splitting it turns one player into two
 # menu entries, which is exactly what this replaced.
@@ -141,4 +126,214 @@ pause_if_double_clicked() {
         printf '\nPress return to close this window... '
         read -r _ || true
     fi
+}
+
+# ---------------------------------------------------------------- logging ----
+# The installer writes a full log of what it did and why. It captures every layer
+# of each URL check: name resolution, TCP, TLS, HTTP status, timings, response
+# headers and a body excerpt. Anything that could be replayed is redacted first,
+# because a Subsonic token plus its salt is a working credential.
+
+SHOKZ_LOG=""
+
+# Strip credentials from a string before it reaches the log: the token and salt
+# query parameters, and the password itself if it ever appears.
+redact() {
+    local s="$1"
+    if [ -n "${ND_PASS:-}" ]; then
+        s="${s//"$ND_PASS"/<redacted-password>}"
+    fi
+    printf '%s' "$s" | sed -E 's/([?&](t|s|p|token|salt|password|u)=)[^&[:space:]]*/\1<redacted>/g'
+}
+
+# Append one line to the log file. Writes only to the file, so the deep detail does
+# not clutter the terminal. A no-op until log_init has run.
+log() {
+    [ -n "${SHOKZ_LOG:-}" ] || return 0
+    if [ -z "${1:-}" ]; then
+        printf '\n' >> "$SHOKZ_LOG" 2>/dev/null || true
+        return 0
+    fi
+    printf '%s\n' "$(redact "$*")" >> "$SHOKZ_LOG" 2>/dev/null || true
+}
+
+log_init() {
+    local dir="$SUPPORT/logs"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    chmod 700 "$dir" 2>/dev/null || true
+    SHOKZ_LOG="$dir/install-$(date +%Y%m%dT%H%M%S).log"
+    : > "$SHOKZ_LOG" 2>/dev/null || { SHOKZ_LOG=""; return 0; }
+    chmod 600 "$SHOKZ_LOG" 2>/dev/null || true
+    ln -sf "$(basename "$SHOKZ_LOG")" "$dir/latest.log" 2>/dev/null || true
+    log "=== $APP_NAME installer ==="
+    log "started : $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    log "log     : $SHOKZ_LOG"
+    log "note    : mode 600. Tokens, salts and the password are redacted."
+}
+
+# What each curl exit code means, so the log explains the failure rather than
+# printing a number.
+curl_meaning() {
+    case "${1:-}" in
+        0)    echo "ok" ;;
+        5)    echo "could not resolve proxy" ;;
+        6)    echo "could not resolve host (DNS)" ;;
+        7)    echo "connection refused (nothing listening)" ;;
+        28)   echo "timed out: no reply before the deadline. Filtered port, or an upstream that accepts and never answers" ;;
+        35)   echo "TLS handshake failed" ;;
+        51|60) echo "certificate not trusted, or does not match this host" ;;
+        52)   echo "server closed the connection without replying" ;;
+        56)   echo "failure receiving data" ;;
+        *)    echo "unclassified curl failure" ;;
+    esac
+}
+
+# Everything about one URL, at every layer, into the log.
+diag_url() {
+    local url="$1" user="$2" pass="$3" timeout="${4:-8}"
+    local scheme host port salt token hdr body err meta rc st tls_time tls_ok conn_time connected concl
+    local W=16
+
+    scheme="${url%%://*}"
+    host="${url#*://}"; host="${host%%/*}"
+    port=443; [ "$scheme" = "http" ] && port=80
+    case "$host" in *:*) port="${host##*:}"; host="${host%%:*}";; esac
+
+    log ""
+    log "  ------------------------------------------------------------------"
+    log "  $(printf "%-${W}s : %s" "url" "$url")"
+    log "  $(printf "%-${W}s : %s" "scheme/host/port" "$scheme $host $port")"
+
+    # An address literal needs no lookup, and saying "no record" for one is wrong.
+    if printf '%s' "$host" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || printf '%s' "$host" | grep -q ':'; then
+        log "  $(printf "%-${W}s : %s" "DNS" "address literal, no lookup needed")"
+    elif [ -n "$(dig +short A "$host" 2>/dev/null)$(dig +short AAAA "$host" 2>/dev/null)" ]; then
+        log "  $(printf "%-${W}s : %s" "DNS A" "$(dig +short A "$host" 2>/dev/null | tr '\n' ' ')")"
+        log "  $(printf "%-${W}s : %s" "DNS AAAA" "$(dig +short AAAA "$host" 2>/dev/null | tr '\n' ' ')")"
+        log "  $(printf "%-${W}s : %s" "DNS server" "$(dig "$host" A 2>/dev/null | awk '/^;; SERVER/{print $3; exit}')")"
+    else
+        log "  $(printf "%-${W}s : %s" "DNS" "no A or AAAA record for $host")"
+    fi
+
+    if command -v nc >/dev/null 2>&1; then
+        if nc -z -G "$timeout" "$host" "$port" >/dev/null 2>&1; then
+            log "  $(printf "%-${W}s : %s" "TCP $port" "open")"
+        else
+            log "  $(printf "%-${W}s : %s" "TCP $port" "closed or filtered")"
+        fi
+    fi
+
+    salt=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)
+    token=$(printf '%s' "${pass}${salt}" | md5)
+    hdr=$(mktemp 2>/dev/null) || hdr=""
+    body=$(mktemp 2>/dev/null) || body=""
+    err=$(mktemp 2>/dev/null) || err=""
+
+    # -s keeps curl's own error text out of the machine-readable -w fields, so the
+    # two can be logged as separate lines instead of one mangled one.
+    meta=$(curl -s -D "${hdr:-/dev/null}" -o "${body:-/dev/null}" -w \
+        'code=%{http_code} ip=%{remote_ip} httpver=%{http_version} dns=%{time_namelookup}s connect=%{time_connect}s tls=%{time_appconnect}s firstbyte=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} redirects=%{num_redirects}' \
+        --connect-timeout "$timeout" --max-time "$((timeout * 2))" \
+        "${url%/}/rest/ping.view?u=${user}&t=${token}&s=${salt}&v=1.12.0&c=installer&f=json" \
+        2>"${err:-/dev/null}")
+    rc=$?
+
+    log "  $(printf "%-${W}s : %s" "curl exit" "$rc, $(curl_meaning "$rc")")"
+    log "  $(printf "%-${W}s : %s" "timings" "$meta")"
+    if [ -s "${err:-/dev/null}" ]; then
+        while IFS= read -r ln; do
+            log "  $(printf "%-${W}s : %s" "curl says" "$ln")"
+        done < "$err"
+    fi
+
+    if [ -s "${hdr:-/dev/null}" ]; then
+        log "  $(printf "%-${W}s :" "response head")"
+        while IFS= read -r ln; do log "    $ln"; done < "$hdr"
+    else
+        log "  $(printf "%-${W}s : %s" "response head" "none received")"
+    fi
+
+    st=""
+    if [ -s "${body:-/dev/null}" ]; then
+        log "  $(printf "%-${W}s :" "body excerpt")"
+        head -c 400 "$body" | tr -d '\r' | while IFS= read -r ln; do log "    $ln"; done
+        st=$(jq -r '.["subsonic-response"].status // empty' < "$body" 2>/dev/null)
+    elif [ -s "${hdr:-/dev/null}" ]; then
+        log "  $(printf "%-${W}s : %s" "body" "empty, the server replied with headers only")"
+    else
+        log "  $(printf "%-${W}s : %s" "body" "none, no response was received")"
+    fi
+    log "  $(printf "%-${W}s : %s" "subsonic status" "${st:-<none>}")"
+
+    tls_time=$(printf '%s' "$meta" | sed -n 's/.*tls=\([0-9.]*\)s.*/\1/p')
+    case "$tls_time" in ""|0|0.000000) tls_ok=0 ;; *) tls_ok=1 ;; esac
+    conn_time=$(printf '%s' "$meta" | sed -n 's/.*connect=\([0-9.]*\)s.*/\1/p')
+    case "$conn_time" in ""|0|0.000000) connected=0 ;; *) connected=1 ;; esac
+
+    if [ "$rc" -eq 0 ] && [ "$st" = "ok" ]; then
+        concl="authenticated"
+    elif [ "$rc" -eq 0 ] && [ -n "$st" ]; then
+        concl="reachable, and it rejected the credentials"
+    elif [ "$rc" -eq 28 ] && [ -s "${hdr:-/dev/null}" ]; then
+        concl="headers arrived but the body never finished, so the upstream stalled mid-response"
+    elif [ "$rc" -eq 28 ] && [ "$tls_ok" = 1 ]; then
+        concl="TLS completed and then nothing came back. A proxy is waiting on an upstream that never answers"
+    elif [ "$rc" -eq 28 ] && [ "$connected" = 1 ]; then
+        concl="the TCP connection opened and the server never replied"
+    elif [ "$rc" -eq 28 ]; then
+        concl="no reply before the deadline. The port is filtered, or the host is down"
+    elif [ "$rc" -eq 7 ]; then
+        concl="nothing is listening on that port"
+    elif [ "$rc" -eq 6 ]; then
+        concl="the hostname did not resolve"
+    elif [ "$rc" -eq 35 ] || [ "$rc" -eq 51 ] || [ "$rc" -eq 60 ]; then
+        concl="the TLS handshake or the certificate failed"
+    else
+        concl="see the curl exit code above"
+    fi
+    log "  $(printf "%-${W}s : %s" "conclusion" "$concl")"
+
+    [ -n "$hdr" ] && rm -f "$hdr"
+    [ -n "$body" ] && rm -f "$body"
+    [ -n "$err" ] && rm -f "$err"
+    # The status is the return value, so this one instrumented request also decides
+    # the outcome rather than probing the same URL twice.
+    printf '%s' "$st"
+}
+
+log_env() {
+    log ""
+    log "--- environment ---"
+    log "host            : $(hostname 2>/dev/null)"
+    log "model           : $(sysctl -n hw.model 2>/dev/null)"
+    log "macOS           : $(sw_vers -productVersion 2>/dev/null) ($(sw_vers -buildVersion 2>/dev/null))"
+    log "arch            : $(uname -m)"
+    log "run by          : $(id -un) uid=$(id -u)"
+    log "shell           : ${SHELL:-unknown}"
+    log "bash            : $BASH_VERSION"
+    log "brew            : $(brew --version 2>/dev/null | head -1)"
+    log "jq              : $(jq --version 2>/dev/null)"
+    log "curl            : $(curl --version 2>/dev/null | head -1)"
+    log "agent label     : $LABEL"
+    log "app support     : $SUPPORT"
+    log "config path     : $CONFIG"
+    log "plist path      : $PLIST_DEST"
+    log "interpreter     : $BREW_BASH"
+    if [ -x "$BREW_BASH" ]; then
+        log "interp identity : $(codesign -dvvv "$BREW_BASH" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')"
+        if codesign -dvvv "$BREW_BASH" 2>&1 | grep -qi 'Platform identifier'; then
+            log "interp platform : YES. TCC can never grant a platform binary; this is a bug"
+        else
+            log "interp platform : no (grantable)"
+        fi
+    fi
+    log "volumes seen    : $(list_volumes 2>/dev/null | tr '\n' '|')"
+}
+
+
+# Undo the installer's tee and let it drain, so the last log lines are not lost.
+_restore_output() {
+    exec 1>&3 2>&4 2>/dev/null || true
+    exec 3>&- 4>&- 2>/dev/null || true
+    wait 2>/dev/null || true
 }

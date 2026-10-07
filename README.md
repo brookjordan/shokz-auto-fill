@@ -91,6 +91,33 @@ the password). Music already on the device is never touched.
 | `~/.config/shokz-auto-fill/config` | device, URLs, credentials (**mode 600**) |
 | `~/Library/LaunchAgents/local.shokz-auto-fill.plist` | runs the script when `/Volumes` changes |
 | `/tmp/shokz-auto-fill.log` | the job's own log, trimmed to the last 1000 lines |
+| `~/Library/Application Support/ShokzAutoFill/logs/` | one install log per run, mode 600, credentials redacted |
+
+### The install log
+
+Every run writes a timestamped log next to the script, with `latest.log` pointing at the
+newest. It is written for the question you ask after something breaks, so it records the
+reasoning rather than the outcome.
+
+Each configured URL gets a full trace: name resolution, whether the TCP port is open, the
+curl exit code and what it means, timing for DNS, connect, TLS, first byte and total, the
+response headers, an excerpt of the body, the Subsonic status, and a plain conclusion. The
+conclusion distinguishes the cases that look alike from outside, such as a filtered port
+against a host that accepts the connection and never answers.
+
+```
+  url              : http://navidrome.local:4533
+  DNS              : address literal, no lookup needed
+  TCP 4533         : open
+  curl exit        : 28, timed out: no reply before the deadline
+  timings          : code=000 connect=0.000232s tls=0.000000s total=16.006105s bytes=0
+  conclusion       : the TCP connection opened and the server never replied
+```
+
+The log also records the environment, which interpreter was chosen and whether it is a
+platform binary, the config and plist it wrote, the bytes of the script it installed, and
+the permission probe. Tokens, salts and the password never appear, because a Subsonic
+token with its salt is a working credential.
 
 Run it as soon as the device is mounted:
 
