@@ -37,6 +37,45 @@ unreachable. Nothing is written unless you continue.
 Finally it requests removable-volume permission — **macOS shows a dialog; click
 Allow.** See below for why this step exists.
 
+## Updating an existing install
+
+Just run `install.command` again. It detects the existing installation, shows what
+is configured now, and asks what to change:
+
+```
+An existing installation was found.
+  config : ~/.config/shokz-auto-fill/config
+  script : present
+  agent  : loaded  (com.brookjordan.shokz-auto-fill)
+
+Current settings:
+  device     : SWIM PRO
+  url(s)     : http://navidrome.local:4533 https://music.example.com
+  login      : brookjordan   password: stored
+  songs/fill : 50
+
+What would you like to update?  (one number, several separated by spaces, or 'a')
+  1) song count          (now 50)
+  2) Navidrome URL(s)
+  3) device              (now SWIM PRO)
+  4) login               (now brookjordan)
+  5) reinstall script + LaunchAgent, and re-request volume permission
+  a) all of the above
+  q) quit without changing anything
+```
+
+Enter one number, several (e.g. `1 3`), `a` for everything, or `q` to leave
+things alone.
+
+Because the script and the agent read the config at run time, changing a
+**setting** takes effect on the very next fill — no reload, and no server check
+unless you changed the URL or the login.
+
+Choose **5** when you want to reinstall the script and the agent themselves, for
+example to re-request the removable-volume permission after a Homebrew `bash`
+upgrade (see the caveat further down). On a first run the installer does
+everything automatically.
+
 ## Uninstall
 
 Double-click **`uninstall.command`**. It unloads and removes the LaunchAgent and
