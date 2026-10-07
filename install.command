@@ -127,24 +127,7 @@ fi
 if [ "$DO_DEVICE" = 1 ]; then
     say "--- Which device should be filled? ---"
     say "This is the name the player mounts as, i.e. the folder under /Volumes."
-    vols="$(list_volumes || true)"
-    if [ -n "$vols" ]; then
-        say "Currently mounted volumes:"
-        n=0
-        for v in $vols; do
-            n=$((n + 1))
-            printf '  %d) %s\n' "$n" "$v"
-            eval "VOL_$n=\$v"
-        done
-        say ""
-    fi
-    prompt="Volume name"
-    [ -n "$CUR_DEVICE" ] && prompt="$prompt [$CUR_DEVICE]"
-    printf '%s (or a number from the list): ' "$prompt"
-    read -r DEVICE_NAME || true
-    if [ -n "${DEVICE_NAME:-}" ] && [ "$DEVICE_NAME" -eq "$DEVICE_NAME" ] 2>/dev/null; then
-        eval "DEVICE_NAME=\${VOL_$DEVICE_NAME:-}"
-    fi
+    DEVICE_NAME="$(choose_volume "$CUR_DEVICE")"
     [ -n "${DEVICE_NAME:-}" ] || DEVICE_NAME="$CUR_DEVICE"
     [ -n "${DEVICE_NAME:-}" ] || die "A device name is required."
     say "  -> /Volumes/$DEVICE_NAME"

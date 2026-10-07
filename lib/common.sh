@@ -59,18 +59,81 @@ subsonic_ping() {
     printf '%s' "$body" | jq -r '.["subsonic-response"].status // empty' 2>/dev/null
 }
 
-# List mountable volumes, excluding the boot volume. Used for the device menu.
+# List volume names under /Volumes, one per line. A name can contain spaces, so
+# callers must read this line by line. Word-splitting it turns one player into two
+# menu entries, which is exactly what this replaced.
 list_volumes() {
-    local v
+    local v name
     for v in /Volumes/*; do
         [ -d "$v" ] || continue
-        case "$(basename "$v")" in
+        name=$(basename "$v")
+        case "$name" in
             "Macintosh HD"|"Recovery"|"com.apple.TimeMachine"*) continue ;;
         esac
-        basename "$v"
+        printf '%s\n' "$name"
     done
 }
 
+# A short description of a volume for the menu. "Removable" is useless here because
+# macOS reports it for disk images too. What actually separates a player from a
+# mounted image is the protocol, the filesystem, and whether it can be written to.
+volume_hint() {
+    local info fs free ro out
+    info=$(diskutil info "$1" 2>/dev/null) || return 0
+    case "$info" in
+        *"Disk Image"*) printf 'disk image'; return 0 ;;
+    esac
+    fs=$(printf '%s\n' "$info" | sed -n 's/^ *File System Personality: *//p' | head -1)
+    free=$(printf '%s\n' "$info" | sed -n 's/^ *Volume Free Space: *//p' | head -1 | sed 's/ (.*//')
+    ro=$(printf '%s\n' "$info" | sed -n 's/^ *Volume Read-Only: *//p' | head -1)
+    out="${fs:-unknown filesystem}"
+    [ -n "$free" ] && out="$out, $free free"
+    case "$ro" in Yes*) out="$out, read-only" ;; esac
+    printf '%s' "$out"
+}
+
+# Show the mounted volumes and read a choice. The chosen name goes to stdout and
+# everything else to stderr, so the caller can capture it with a command
+# substitution without swallowing the menu.
+choose_volume() {
+    local default="${1:-}"
+    local -a vols=()
+    local line choice i n hint
+    while IFS= read -r line; do
+        [ -n "$line" ] && vols+=("$line")
+    done < <(list_volumes)
+
+    if [ "${#vols[@]}" -gt 0 ]; then
+        printf 'Currently mounted volumes:\n' >&2
+        for i in "${!vols[@]}"; do
+            n=$((i + 1))
+            hint=$(volume_hint "/Volumes/${vols[$i]}")
+            if [ -n "$hint" ]; then
+                printf '  %d) %s  (%s)\n' "$n" "${vols[$i]}" "$hint" >&2
+            else
+                printf '  %d) %s\n' "$n" "${vols[$i]}" >&2
+            fi
+        done
+        printf '\n' >&2
+    fi
+
+    printf 'Volume name' >&2
+    [ -n "$default" ] && printf ' [%s]' "$default" >&2
+    printf ' (or a number from the list): ' >&2
+    IFS= read -r choice || true
+
+    case "${choice:-}" in
+        '')       printf '%s' "$default" ;;
+        *[!0-9]*) printf '%s' "$choice" ;;
+        *)
+            i=$((choice - 1))
+            if [ "$i" -ge 0 ] && [ "$i" -lt "${#vols[@]}" ]; then
+                printf '%s' "${vols[$i]}"
+            else
+                warn "there is no volume numbered $choice" >&2
+            fi ;;
+    esac
+}
 pause_if_double_clicked() {
     # A double-clicked .command closes its Terminal window on exit; hold it open.
     case "${SHOKZ_NO_PAUSE:-0}" in 1) return 0 ;; esac
