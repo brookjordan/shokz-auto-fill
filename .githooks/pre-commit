@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fast checks. The full installer suite is `bash tests/run.sh`, which needs a
+# mounted volume to exercise everything and takes about a minute.
+set -e
+files="install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh"
+for f in $files; do
+    bash -n "$f"
+done
+if command -v shellcheck >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    shellcheck -S warning $files
+else
+    echo "pre-commit: shellcheck not installed, lint skipped"
+fi
