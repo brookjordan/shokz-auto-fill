@@ -24,11 +24,16 @@ Double-click **`install.command`** (or run `./install.command`).
 
 It asks for:
 
+**Escape goes back one step and Ctrl-C cancels.** Every answer is held in its own
+variable, so stepping back never costs you something you typed later, and walking
+forward again offers what you had.
+
 | Prompt | Notes |
 | --- | --- |
 | **Device** | The volume name, i.e. the folder under `/Volumes`. Currently mounted volumes are listed with numbers, so you can pick one. |
 | **Navidrome URL(s)** | One or more, space- or comma-separated, tried in order at fill time. Put a LAN address first for speed, then a remote one. Every URL is checked during install, because a dead fallback is worth finding now rather than on the day the working one goes away. |
-| **Username / password** | Your Navidrome username, which need not match your macOS account. The password is not echoed and is checked against the server straight away, so it is asked for once rather than twice. A rejected login can be corrected without starting over. |
+| **Username** | Your Navidrome account, which need not match your macOS account. Asked for separately from the password, so a typo noticed at the password prompt is one Escape away from being fixed. |
+| **Password** | Not echoed, and checked against the server straight away rather than typed twice. Pressing Enter keeps a password you already entered. |
 | **Songs per fill** | Default 50. |
 
 It then **verifies the URL and login against the server before installing**, and

@@ -262,13 +262,23 @@
       <p>Double-click <code>install.command</code>, or run it in a terminal. It asks for a few
       settings and checks them against the server before it writes anything.</p>
 
+      <p><strong>Escape goes back one step and Ctrl-C cancels.</strong> Every answer is held
+        in its own variable, so stepping back never costs you something you typed later, and
+        walking forward again offers what you had.</p>
+
       <div class="tablewrap">
         <table>
           <thead><tr><th>Prompt</th><th>Notes</th></tr></thead>
           <tbody>
             <tr><td><strong>Device</strong></td><td>The volume name, i.e. the folder under <code>/Volumes</code>. Mounted volumes are listed with numbers so you can just pick one.</td></tr>
-            <tr><td>Navidrome URLs</td><td>One or more, space- or comma-separated, tried in order until one answers. Put a LAN address first, then a remote one.</td></tr>
-            <tr><td><strong>Username / password</strong></td><td>Your Navidrome username, which need not match your macOS account. The password is not echoed and is checked against the server straight away, so it is asked for once rather than twice. A rejected login can be corrected without starting over.</td></tr>
+<tr><td>Navidrome URLs</td><td>One or more, space- or comma-separated, tried in order at fill
+time. Put a LAN address first, then a remote one. Every URL is checked during install, so a
+dead fallback is found now rather than later.</td></tr>
+<tr><td><strong>Username</strong></td><td>Your Navidrome account, which need not match your
+macOS account. Asked for separately from the password, so a typo noticed at the password
+prompt is one Escape away from being fixed.</td></tr>
+<tr><td><strong>Password</strong></td><td>Not echoed, and checked against the server straight
+away rather than typed twice. Pressing Enter keeps a password you already entered.</td></tr>
             <tr><td><strong>Songs per fill</strong></td><td>Default 50. Validated as a positive whole number.</td></tr>
           </tbody>
         </table>

@@ -83,7 +83,7 @@ volume_hint() {
 choose_volume() {
     local default="${1:-}"
     local -a vols=()
-    local line choice i n hint
+    local line choice i n hint rc
     while IFS= read -r line; do
         [ -n "$line" ] && vols+=("$line")
     done < <(list_volumes)
@@ -102,10 +102,10 @@ choose_volume() {
         printf '\n' >&2
     fi
 
-    printf 'Volume name' >&2
-    [ -n "$default" ] && printf ' [%s]' "$default" >&2
-    printf ' (or a number from the list): ' >&2
-    IFS= read -r choice || true
+    read_step_raw "Volume name${default:+ [$default]} (or a number from the list)" "$default"
+    rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    choice="$STEP_VALUE"
 
     case "${choice:-}" in
         '')       printf '%s' "$default" ;;
@@ -333,7 +333,86 @@ log_env() {
 
 # Undo the installer's tee and let it drain, so the last log lines are not lost.
 _restore_output() {
+    stty icanon echo 2>/dev/null || true
     exec 1>&3 2>&4 2>/dev/null || true
     exec 3>&- 4>&- 2>/dev/null || true
     wait 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------- prompting --
+# Interactive reads that support stepping back. A bare Escape is caught by reading
+# one keystroke in raw mode; the rest of the line is read normally, so editing and
+# pasting still work. Values live in globals, so revisiting a step never costs an
+# answer given at another one.
+
+STEP_VALUE=""
+SECRET_VALUE=""
+
+# Read one line. Returns 0 for a line, 1 for Escape, 2 for cancel.
+_read_core() {
+    local silent="$1" first rest nxt rc
+    STEP_VALUE=""
+    while :; do
+        if [ "$silent" = 1 ]; then
+            IFS= read -rsn1 first; rc=$?
+        else
+            IFS= read -rn1 first; rc=$?
+        fi
+        # End of input is not the same as pressing Enter. Without this, exhausted
+        # stdin takes the default forever and the step machine spins.
+        if [ "$rc" -ne 0 ] && [ -z "$first" ]; then return 2; fi
+        case "$first" in
+            $'\e')
+                # Arrows and function keys also begin with ESC. Drain and ignore
+                # those, so only a bare Escape means "go back".
+                stty -icanon min 0 time 0 2>/dev/null || true
+                IFS= read -rn1 nxt 2>/dev/null || true
+                stty icanon 2>/dev/null || true
+                case "$nxt" in
+                    '['|'O')
+                        stty -icanon min 0 time 0 2>/dev/null || true
+                        IFS= read -rn1 nxt 2>/dev/null || true
+                        IFS= read -rn1 nxt 2>/dev/null || true
+                        stty icanon 2>/dev/null || true
+                        continue ;;
+                    '') return 1 ;;
+                    *)  return 1 ;;
+                esac ;;
+            $'\x03'|$'\x04') return 2 ;;
+        esac
+        break
+    done
+    [ -n "$first" ] || return 0
+    if [ "$silent" = 1 ]; then
+        IFS= read -rs rest || true
+    else
+        IFS= read -r rest || true
+    fi
+    STEP_VALUE="${first}${rest}"
+    return 0
+}
+
+# Prompt with the brackets supplied by the caller, e.g. "URL(s) [old]".
+read_step_raw() {
+    local prompt="$1" default="${2:-}" rc
+    printf '%s: ' "$prompt" >&2
+    stty -icanon min 1 time 0 2>/dev/null || true
+    _read_core 0; rc=$?
+    stty icanon 2>/dev/null || true
+    if [ "$rc" -ne 0 ]; then printf '\n' >&2; return "$rc"; fi
+    [ -n "$STEP_VALUE" ] || STEP_VALUE="$default"
+    return 0
+}
+
+# Read without echoing, for the password.
+read_secret() {
+    local prompt="$1" rc
+    printf '%s: ' "$prompt" >&2
+    stty -icanon min 1 time 0 2>/dev/null || true
+    _read_core 1; rc=$?
+    stty icanon 2>/dev/null || true
+    printf '\n' >&2
+    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    SECRET_VALUE="$STEP_VALUE"
+    return 0
 }

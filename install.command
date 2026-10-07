@@ -148,191 +148,235 @@ if [ "$INSTALLED" = 1 ]; then
     say ""
 fi
 
-# ------------------------------------------------------------------- the device
-if [ "$DO_DEVICE" = 1 ]; then
+# ------------------------------------------------------- ask for the settings
+# Every question is a step. Escape goes back one, Ctrl-C cancels, and each answer
+# lives in its own variable, so stepping back never costs a later answer.
+
+say "Answer the following questions. Escape goes back one step, Ctrl-C cancels."
+say ""
+
+DEVICE_NAME="$CUR_DEVICE"
+ND_URLS="$CUR_URLS"
+ND_USER="$CUR_USER"
+ND_PASS="$CUR_PASS"
+SONG_COUNT="${CUR_SONGS:-50}"
+
+STEPS=()
+[ "$DO_DEVICE" = 1 ] && STEPS+=("device")
+[ "$DO_URLS" = 1 ] && STEPS+=("urls")
+[ "$DO_LOGIN" = 1 ] && STEPS+=("username")
+[ "$DO_LOGIN" = 1 ] && STEPS+=("password")
+[ "$DO_SONGS" = 1 ] && STEPS+=("songs")
+
+STEP_INDEX=0
+step_index_of() {
+    local want="$1" k=0 s
+    for s in "${STEPS[@]}"; do
+        if [ "$s" = "$want" ]; then STEP_INDEX="$k"; return 0; fi
+        k=$((k + 1))
+    done
+    STEPS+=("$want")
+    STEP_INDEX=$((${#STEPS[@]} - 1))
+    return 0
+}
+
+ask_device() {
+    say ""
     say "--- Which device should be filled? ---"
-    say "This is the name the player mounts as, i.e. the folder under /Volumes."
-    DEVICE_NAME="$(choose_volume "$CUR_DEVICE")"
-    [ -n "${DEVICE_NAME:-}" ] || DEVICE_NAME="$CUR_DEVICE"
-    [ -n "${DEVICE_NAME:-}" ] || die "A device name is required."
-    say "  -> /Volumes/$DEVICE_NAME"
-    say ""
-else
-    DEVICE_NAME="$CUR_DEVICE"
-fi
-
-# --------------------------------------------------------- Navidrome URL(s)
-if [ "$DO_URLS" = 1 ]; then
-    say "--- Navidrome URL(s) ---"
-    say "Space-separated, tried in order until one answers. Put the fastest first"
-    say "(e.g. a LAN address), then anything that works remotely."
-    prompt="URL(s)"
-    [ -n "$CUR_URLS" ] && prompt="$prompt [$CUR_URLS]"
-    printf '%s: ' "$prompt"
-    read -r ND_URLS || true
-    [ -n "${ND_URLS:-}" ] || ND_URLS="$CUR_URLS"
-    [ -n "${ND_URLS:-}" ] || die "At least one Navidrome URL is required."
-    ND_URLS="$(printf '%s' "$ND_URLS" | tr ',' ' ')"
-    say "  -> will try: $ND_URLS"
-    say ""
-else
-    ND_URLS="$CUR_URLS"
-fi
-
-# ------------------------------------------------------------------ the login
-if [ "$DO_LOGIN" = 1 ]; then
-    say "--- Navidrome login ---"
-    # The Navidrome account is not necessarily the macOS account, so there is no
-    # sensible default from `id -un`. Ask rather than guess.
-    if [ -n "$CUR_USER" ]; then
-        printf 'Username [%s]: ' "$CUR_USER"
-    else
-        printf 'Username: '
-    fi
-    read -r ND_USER || true
-    [ -n "${ND_USER:-}" ] || ND_USER="$CUR_USER"
-    while [ -z "${ND_USER:-}" ]; do
-        printf 'A Navidrome username is required. Username: '
-        read -r ND_USER || true
-    done
-
-    ND_PASS=""
-    if [ -n "$CUR_PASS" ]; then
-        printf 'Keep the stored password? [Y/n]: '
-        read -r ans || true
-        case "${ans:-Y}" in
-            [Nn]*) : ;;
-            *) ND_PASS="$CUR_PASS"; say "  -> keeping the stored password" ;;
-        esac
-    fi
-    if [ -z "$ND_PASS" ]; then
-        printf 'Password for %s (not echoed, will be checked): ' "$ND_USER"
-        read -r -s ND_PASS || true
-        printf '\n'
-    fi
-    [ -n "${ND_PASS:-}" ] || die "A password is required."
-    say ""
-else
-    ND_USER="$CUR_USER"
-    ND_PASS="$CUR_PASS"
-fi
-
-# ------------------------------------------------------------- songs per fill
-if [ "$DO_SONGS" = 1 ]; then
-    printf -- '--- Songs per fill [%s]: ' "$CUR_SONGS"
-    read -r SONG_COUNT || true
-    [ -n "${SONG_COUNT:-}" ] || SONG_COUNT="$CUR_SONGS"
-else
-    SONG_COUNT="$CUR_SONGS"
-fi
-case "${SONG_COUNT:-}" in
-    ''|*[!0-9]*) die "Songs per fill must be a whole number (got '${SONG_COUNT:-}')." ;;
-esac
-[ "$SONG_COUNT" -gt 0 ] || die "Songs per fill must be greater than zero."
-[ "$DO_SONGS" = 1 ] && { say "  -> $SONG_COUNT songs per fill"; say ""; }
-
-# ------------------------------------------- verify (only when it can matter)
-log ""
-log "--- settings gathered ---"
-log "device          : $DEVICE_NAME"
-log "urls            : $ND_URLS"
-log "username        : $ND_USER"
-log "password        : $([ -n "${ND_PASS:-}" ] && echo 'set, never logged' || echo MISSING)"
-log "songs per fill  : $SONG_COUNT"
-
-if [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ] || [ "$INSTALLED" = 0 ]; then
-    say "--- Checking every configured URL ---"
-    n_total=0
-    n_ok=0
-    n_reach=0
-    dead=""
+    say "The name the player mounts as, the folder under /Volumes."
+    local v rc
     while :; do
-        n_total=0
-        n_ok=0
-        n_reach=0
-        dead=""
-        for u in $ND_URLS; do
-            u="${u%/}"
-            n_total=$((n_total + 1))
-            st="$(diag_url "$u" "$ND_USER" "$ND_PASS" 8)"
-            log "    verdict      : ${st:-no answer}"
-            if [ -z "$st" ]; then
-                say "  no answer : $u"
-                dead="$dead $u"
-            elif [ "$st" = "ok" ]; then
-                say "  ok        : $u (authenticated)"
-                n_ok=$((n_ok + 1))
-                n_reach=$((n_reach + 1))
-            else
-                say "  rejected  : $u (Subsonic status='$st')"
-                n_reach=$((n_reach + 1))
-            fi
-        done
-        say "  ${n_ok} of ${n_total} authenticated."
+        v="$(choose_volume "$DEVICE_NAME")"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        if [ -n "$v" ]; then DEVICE_NAME="$v"; break; fi
+        warn "a device name is required."
+    done
+    say "  -> /Volumes/$DEVICE_NAME"
+    return 0
+}
 
-        if [ "$n_ok" -gt 0 ] && [ -z "$dead" ]; then
-            break
-        fi
+ask_urls() {
+    say ""
+    say "--- Navidrome URL(s) ---"
+    say "Space-separated, tried in order. Put the fastest first, then a remote one."
+    local rc
+    while :; do
+        read_step_raw "URL(s)${ND_URLS:+ [$ND_URLS]}" "$ND_URLS"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        ND_URLS="$(printf '%s' "$STEP_VALUE" | tr ',' ' ')"
+        if [ -n "$ND_URLS" ]; then break; fi
+        warn "at least one URL is required."
+    done
+    say "  -> will try: $ND_URLS"
+    return 0
+}
 
-        if [ "$n_ok" -gt 0 ]; then
-            # Something works but part of the list does not, and a broken fallback is
-            # only discovered on the day the working URL goes away.
-            warn "these URLs did not answer:${dead}"
-            printf 'Edit the URL list now? [y/N]: '
-            read -r ans || true
-            case "${ans:-N}" in
-                [Yy]*) ;;
-                *) break ;;
-            esac
-            printf 'URL(s): '
-            read -r _urls || true
-            if [ -n "${_urls:-}" ]; then ND_URLS="$(printf '%s' "$_urls" | tr ',' ' ')"; fi
-            say ""
-            continue
-        fi
+# The username and the password are separate steps so that noticing a typo in the
+# username at the password prompt is one Escape away from fixing it.
+ask_username() {
+    say ""
+    say "--- Navidrome username ---"
+    say "Your Navidrome account, which need not match your macOS account."
+    local rc
+    while :; do
+        read_step_raw "Username${ND_USER:+ [$ND_USER]}" "$ND_USER"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        if [ -n "$STEP_VALUE" ]; then ND_USER="$STEP_VALUE"; break; fi
+        warn "a Navidrome username is required."
+    done
+    return 0
+}
 
-        if [ "$n_reach" -gt 0 ]; then
-            # A host answered, so the addresses are right and the login is not.
-            warn "a server answered but rejected the login."
-            printf 'Re-enter the login now? [Y/n]: '
-            read -r ans || true
-            case "${ans:-Y}" in
-                [Nn]*) break ;;
-            esac
-            printf 'Username [%s]: ' "$ND_USER"
-            read -r _newuser || true
-            [ -n "${_newuser:-}" ] && ND_USER="$_newuser"
-            printf 'Password (not echoed, will be checked): '
-            read -r -s ND_PASS || true
-            printf '\n'
-            [ -n "${ND_PASS:-}" ] || warn "empty password"
-            say ""
-            continue
-        fi
+ask_password() {
+    say ""
+    say "--- Navidrome password ---"
+    local rc
+    if [ -n "$ND_PASS" ]; then
+        read_step_raw "Keep the password already set? [Y/n]" "Y"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        case "$STEP_VALUE" in [Nn]*) ND_PASS="" ;; *) return 0 ;; esac
+    fi
+    while :; do
+        read_secret "Password for $ND_USER (not echoed, will be checked)"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        if [ -n "$SECRET_VALUE" ]; then ND_PASS="$SECRET_VALUE"; fi
+        [ -n "$ND_PASS" ] || warn "a password is required."
+        [ -n "$ND_PASS" ] && break
+    done
+    return 0
+}
 
-        # Nothing answered at all, so the list itself is the problem.
-        warn "no configured URL answered:${ND_URLS}"
-        printf 'Re-enter the URL list? [Y/n]: '
-        read -r ans || true
-        case "${ans:-Y}" in
-            [Nn]*) break ;;
+ask_songs() {
+    say ""
+    say "--- Songs per fill ---"
+    local rc
+    while :; do
+        read_step_raw "How many songs per fill${SONG_COUNT:+ [$SONG_COUNT]}" "$SONG_COUNT"; rc=$?
+        [ "$rc" -eq 0 ] || return "$rc"
+        case "$STEP_VALUE" in
+            ''|*[!0-9]*) warn "enter a whole number." ;;
+            0)           warn "enter a number greater than zero." ;;
+            *)           SONG_COUNT="$STEP_VALUE"; break ;;
         esac
-        printf 'URL(s): '
-        read -r _urls || true
-        if [ -n "${_urls:-}" ]; then ND_URLS="$(printf '%s' "$_urls" | tr ',' ' ')"; fi
+    done
+    say "  -> $SONG_COUNT songs per fill"
+    return 0
+}
+
+# Test every URL. Returns 0 to carry on, 3 to go back to the login, 4 to go back to
+# the URL list, 5 to abandon.
+CHECK_ATTEMPT=0
+run_checks() {
+    local n_total=0 n_ok=0 n_reach=0 dead="" u st rc
+    CHECK_ATTEMPT=$((CHECK_ATTEMPT + 1))
+    if [ "$CHECK_ATTEMPT" -gt 20 ]; then
+        warn "20 rounds without a working URL. Stopping so this cannot loop forever."
+        return 5
+    fi
+    log ""
+    log "--- settings gathered, check attempt $CHECK_ATTEMPT ---"
+    log "device          : $DEVICE_NAME"
+    log "urls            : $ND_URLS"
+    log "username        : $ND_USER"
+    log "password        : $([ -n "${ND_PASS:-}" ] && echo 'set, never logged' || echo MISSING)"
+    log "songs per fill  : $SONG_COUNT"
+
+    if [ "$DO_URLS" != 1 ] && [ "$DO_LOGIN" != 1 ] && [ "$INSTALLED" = 1 ]; then
         say ""
+        say "Settings changed only - no server check needed (credentials unchanged)."
+        say ""
+        return 0
+    fi
+
+    say ""
+    say "--- Checking every configured URL ---"
+    for u in $ND_URLS; do
+        u="${u%/}"
+        n_total=$((n_total + 1))
+        st="$(diag_url "$u" "$ND_USER" "$ND_PASS" 8)"
+        log "    verdict      : ${st:-no answer}"
+        if [ -z "$st" ]; then
+            say "  no answer : $u"
+            dead="$dead $u"
+        elif [ "$st" = "ok" ]; then
+            say "  ok        : $u (authenticated)"
+            n_ok=$((n_ok + 1)); n_reach=$((n_reach + 1))
+        else
+            say "  rejected  : $u (Subsonic status='$st')"
+            n_reach=$((n_reach + 1))
+        fi
+    done
+    say "  ${n_ok} of ${n_total} authenticated."
+
+    if [ "$n_ok" -gt 0 ] && [ -z "$dead" ]; then return 0; fi
+
+    if [ "$n_ok" -gt 0 ]; then
+        # Something works but part of the list does not, and a broken fallback is
+        # only discovered on the day the working URL goes away.
+        warn "these URLs did not answer:${dead}"
+        read_step_raw "Go back and edit the URL list? [Y/n]" "Y"; rc=$?
+        [ "$rc" -eq 0 ] || return 2
+        case "$STEP_VALUE" in [Nn]*) return 0 ;; *) return 4 ;; esac
+    fi
+
+    if [ "$n_reach" -gt 0 ]; then
+        warn "a server answered, so the addresses are right, but it rejected that login."
+        read_step_raw "Go back and fix the login? [Y/n]" "Y"; rc=$?
+        [ "$rc" -eq 0 ] || return 2
+        case "$STEP_VALUE" in [Nn]*) : ;; *) return 3 ;; esac
+    else
+        warn "no configured URL answered:${ND_URLS}"
+        read_step_raw "Go back and edit the URL list? [Y/n]" "Y"; rc=$?
+        [ "$rc" -eq 0 ] || return 2
+        case "$STEP_VALUE" in [Nn]*) : ;; *) return 4 ;; esac
+    fi
+
+    read_step_raw "Install anyway, to fix it later? [y/N]" "N"; rc=$?
+    [ "$rc" -eq 0 ] || return 2
+    case "$STEP_VALUE" in [Yy]*) return 0 ;; *) return 5 ;; esac
+}
+
+i=0
+rc=0
+while :; do
+    while [ "$i" -lt "${#STEPS[@]}" ]; do
+        case "${STEPS[$i]}" in
+            device) ask_device; rc=$? ;;
+            urls)   ask_urls;   rc=$? ;;
+            username) ask_username; rc=$? ;;
+            password) ask_password; rc=$? ;;
+            songs)  ask_songs;  rc=$? ;;
+            *)      rc=0 ;;
+        esac
+        if [ "$rc" -eq 0 ]; then
+            i=$((i + 1))
+        elif [ "$rc" -eq 1 ]; then
+            if [ "$i" -gt 0 ]; then
+                i=$((i - 1))
+            else
+                say "  this is the first question, so there is nothing to go back to"
+            fi
+        else
+            say ""
+            say "Cancelled. Nothing was changed."
+            pause_if_double_clicked
+            exit 0
+        fi
     done
 
-    if [ "$n_ok" -eq 0 ]; then
-        printf 'No URL was verified. Install anyway so you can fix it later? [y/N]: '
-        read -r ans || true
-        case "${ans:-N}" in [Yy]*) : ;; *) die "Aborted at your request." ;; esac
-    fi
-    say ""
-else
-    say "Settings changed only - no server check needed (credentials unchanged)."
-    say ""
-fi
+    run_checks; rc=$?
+    case "$rc" in
+        0) break ;;
+        3) step_index_of username; i="$STEP_INDEX" ;;
+        4) step_index_of urls;  i="$STEP_INDEX" ;;
+        5) say ""
+           say "Aborted at your request. Nothing was changed."
+           pause_if_double_clicked
+           exit 0 ;;
+        *) break ;;
+    esac
+done
+say ""
 
 # ------------------------------------------------------------- write config
 mkdir -p "$CONFIG_DIR"
