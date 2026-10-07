@@ -161,8 +161,9 @@ change it back to `/bin/bash`.**
 
 For an unsigned binary macOS keys the grant by **path**, and it resolves
 symlinks. So the grant binds to a versioned Cellar path like
-`/opt/homebrew/Cellar/bash/5.3.20/bin/bash`. A `brew upgrade bash` moves that
-path and **the grant is silently lost**, after which the job fails as before.
+`/opt/homebrew/Cellar/bash/5.3.20/bin/bash`, and your own will carry a different
+version. A `brew upgrade bash` moves that path and **the grant is silently lost**,
+after which the job fails as before.
 
 Two ways to handle it:
 

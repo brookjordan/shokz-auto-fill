@@ -470,7 +470,8 @@ Publishing &lt;TCCDEvent: type=Create, service=kTCCServiceSystemPolicyRemovableV
       <h2><span class="num">07</span>Keeping the permission working</h2>
       <p>For an unsigned binary, macOS keys the grant by path, and it resolves symlinks. The grant
         therefore binds to a versioned Cellar path such as
-        <code>/opt/homebrew/Cellar/bash/5.3.20/bin/bash</code>.</p>
+        <code>/opt/homebrew/Cellar/bash/5.3.20/bin/bash</code>, and your own will carry a
+        different version.</p>
 
       <div class="callout warn">
         <p class="t">A <code>brew upgrade bash</code> breaks the job</p>
