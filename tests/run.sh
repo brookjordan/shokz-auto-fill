@@ -215,6 +215,27 @@ check "exits 0" "$rc" "0"
 check "the deleted character is gone" "$(grep -m1 '^ND_URLS=' "$(conf home12)")" 'ND_URLS="http://127.0.0.1:18801"'
 has "the corrected URL authenticates" "$(cat "$WORK/out12")" "1 of 1 authenticated"
 
+# Going back to fix one answer must not drag the user through the rest of them.
+echo "== fixing a URL re-asks only the URL =="
+# 18804 has nothing listening, so the check reports no answer and offers the fix.
+printf 'http://127.0.0.1:18804\ntestuser\ntestpass\nTEST PRO\n5\ny\nhttp://127.0.0.1:18801\n' > "$WORK/in13"
+rc=$(run_install home13 "$WORK/in13" "$WORK/out13")
+check "exits 0" "$rc" "0"
+check "the URL list was asked twice" "$(grep -c '^URL(s)' "$WORK/out13")" "2"
+check "the login was asked once" "$(grep -c '^Username' "$WORK/out13")" "1"
+check "the device was asked once" "$(grep -c '^Volume name' "$WORK/out13")" "1"
+has "the corrected URL authenticates" "$(cat "$WORK/out13")" "1 of 1 authenticated"
+
+echo "== fixing a login re-asks the login, not the device =="
+# 18802 answers but rejects every login, which offers the login fix. The password
+# step asks twice - keep the stored one, then the new one - hence the n before it.
+printf 'http://127.0.0.1:18802\ntestuser\ntestpass\nTEST PRO\n5\ny\nnewuser\nn\nnewpass\nn\ny\n' > "$WORK/in14"
+rc=$(run_install home14 "$WORK/in14" "$WORK/out14")
+check "exits 0" "$rc" "0"
+check "the login was asked twice" "$(grep -c '^Username' "$WORK/out14")" "2"
+check "the device was asked once" "$(grep -c '^Volume name' "$WORK/out14")" "1"
+check "the corrected username is recorded" "$(grep -m1 '^ND_USER=' "$(conf home14)")" 'ND_USER="newuser"'
+
 # ------------------------------------------------------ a rejected login ------
 echo "== a rejected login is named, and can be accepted =="
 printf 'http://127.0.0.1:18802\ntestuser\ntestpass\nTEST PRO\n5\nn\ny\n' > "$WORK/in5"

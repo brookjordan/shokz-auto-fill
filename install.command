@@ -178,6 +178,11 @@ STEPS=()
 
 STEP_INDEX=0
 MAX_REACHED=-1
+# When the check sends the user back to fix a URL or a login, this is the step to
+# carry on from once the fix is answered. Everything after it is left alone, so
+# fixing a URL does not re-ask the login and the device and song count are not
+# asked a second time.
+RESUME_AT=""
 
 # Down should only walk forward over questions already answered.
 step_has_value() {
@@ -459,6 +464,12 @@ while :; do
             [ "$i" -gt "$MAX_REACHED" ] && MAX_REACHED="$i"
             start_checks_after "${STEPS[$i]}" "$((i + 1))"
             i=$((i + 1))
+            # Straight back to the check the user came from, rather than through
+            # questions whose answers have not changed.
+            if [ -n "$RESUME_AT" ] && [ "$i" -ge "$RESUME_AT" ]; then
+                RESUME_AT=""
+                i="${#STEPS[@]}"
+            fi
         elif [ "$rc" -eq 1 ]; then
             if [ "$i" -gt 0 ]; then
                 i=$((i - 1))
@@ -482,8 +493,10 @@ while :; do
     run_checks; rc=$?
     case "$rc" in
         0) break ;;
-        3) step_index_of username; i="$STEP_INDEX" ;;
-        4) step_index_of urls;  i="$STEP_INDEX" ;;
+        3) step_index_of username; i="$STEP_INDEX"
+           step_index_of password; RESUME_AT=$((STEP_INDEX + 1)) ;;
+        4) step_index_of urls;  i="$STEP_INDEX"
+           RESUME_AT=$((STEP_INDEX + 1)) ;;
         5) say ""
            say "Aborted at your request. Nothing was changed."
            pause_if_double_clicked
