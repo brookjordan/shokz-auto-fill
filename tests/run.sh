@@ -104,7 +104,7 @@ start_server hang 18803
 
 # ------------------------------------------------------- the straight run -----
 echo "== a normal install =="
-printf 'TEST PRO\nhttp://127.0.0.1:18801\ntestuser\ntestpass\n7\n' > "$WORK/in1"
+printf 'http://127.0.0.1:18801\ntestuser\ntestpass\nTEST PRO\n7\n' > "$WORK/in1"
 rc=$(run_install home1 "$WORK/in1" "$WORK/out1")
 check "exits 0" "$rc" "0"
 check "device name with a space survives" "$(grep -m1 '^DEVICE_NAME=' "$(conf home1)")" 'DEVICE_NAME="TEST PRO"'
@@ -112,6 +112,13 @@ check "username recorded" "$(grep -m1 '^ND_USER=' "$(conf home1)")" 'ND_USER="te
 check "song count recorded" "$(grep -m1 '^SONG_COUNT=' "$(conf home1)")" 'SONG_COUNT=7'
 check "config is mode 600" "$(stat -f '%Sp' "$(conf home1)")" "-rw-------"
 has "URL authenticated" "$(cat "$WORK/out1")" "1 of 1 authenticated"
+# The credentials are asked for first so the check can run while the rest is
+# answered, so the device question must come after the login.
+if awk '/^URL\(s\):/{u=NR} /^Volume name/{d=NR} END{exit !(u && d && u < d)}' "$WORK/out1"; then
+    ok "the server is asked before the device"
+else
+    bad "the server should be asked before the device"
+fi
 has "stub launchctl was used" "$(cat "$STUB_LOG")" "bootstrap"
 hasnt "password never reaches the install log" "$(cat "$(installed_log home1)")" "testpass"
 has "deep diagnostics recorded a conclusion" "$(cat "$(installed_log home1)")" "conclusion"
@@ -131,7 +138,7 @@ for v in /Volumes/*; do
     esac
 done
 if [ -n "$spaced" ]; then
-    printf '%s\nhttp://127.0.0.1:18801\ntestuser\ntestpass\n5\n' "$spaced" > "$WORK/in2"
+    printf 'http://127.0.0.1:18801\ntestuser\ntestpass\n%s\n5\n' "$spaced" > "$WORK/in2"
     rc=$(run_install home2 "$WORK/in2" "$WORK/out2")
     check "exits 0 with a spaced volume" "$rc" "0"
     check "volume listed once, whole" "$(grep -cE "^  [0-9]+\) ${spaced}(  \(.*\))?$" "$WORK/out2")" "1"
@@ -143,7 +150,7 @@ fi
 
 # ------------------------------------------------- back navigation (Escape) ---
 echo "== Escape at the password prompt returns to the username =="
-{ printf 'TEST PRO\nhttp://127.0.0.1:18801\nwronguser\n\033'; printf '\ntestuser\ntestpass\n5\n'; } > "$WORK/in3"
+{ printf 'http://127.0.0.1:18801\nwronguser\n\033'; printf '\ntestuser\ntestpass\nTEST PRO\n5\n'; } > "$WORK/in3"
 rc=$(run_install home3 "$WORK/in3" "$WORK/out3")
 check "exits 0" "$rc" "0"
 check "username asked twice" "$(grep -c '^Username' "$WORK/out3")" "2"
@@ -151,16 +158,66 @@ check "corrected username recorded" "$(grep -m1 '^ND_USER=' "$(conf home3)")" 'N
 
 # ------------------------------- exhausted input must not loop (was shipped) --
 echo "== exhausted input cancels instead of spinning =="
-printf 'TEST PRO\nhttp://127.0.0.1:18801\n' > "$WORK/in4"
+printf 'http://127.0.0.1:18801\ntestuser\n' > "$WORK/in4"
 rc=$(run_install home4 "$WORK/in4" "$WORK/out4")
 check "exits 0" "$rc" "0"
 check "cancels once" "$(grep -c 'Cancelled' "$WORK/out4")" "1"
 lines=$(wc -l < "$WORK/out4" | tr -d ' ')
 if [ "$lines" -lt 80 ]; then ok "output stays small ($lines lines)"; else bad "output looks like a loop ($lines lines)"; fi
 
+# ------------------------------------------- pasted and edited answers --------
+# A pasted URL arrives from the terminal wrapped in bracketed-paste markers. The
+# old raw-mode prompt ate the wrapper and read the rest as end of input, which
+# cancelled the whole run.
+echo "== a pasted URL is accepted =="
+printf '\033[200~http://127.0.0.1:18801\033[201~\ntestuser\ntestpass\nTEST PRO\n5\n' > "$WORK/in7"
+rc=$(run_install home7 "$WORK/in7" "$WORK/out7")
+check "exits 0" "$rc" "0"
+check "pasted URL recorded, markers gone" "$(grep -m1 '^ND_URLS=' "$(conf home7)")" 'ND_URLS="http://127.0.0.1:18801"'
+has "pasted URL authenticated" "$(cat "$WORK/out7")" "1 of 1 authenticated"
+
+# An arrow key that reaches the prompt as bytes must never land in the value.
+echo "== stray escape sequences never reach the value =="
+printf 'http://127.0.0.1:18801\033[D\033[D\ntestuser\ntestpass\nTEST PRO\n5\n' > "$WORK/in8"
+rc=$(run_install home8 "$WORK/in8" "$WORK/out8")
+check "exits 0" "$rc" "0"
+check "URL stored without arrow bytes" "$(grep -m1 '^ND_URLS=' "$(conf home8)")" 'ND_URLS="http://127.0.0.1:18801"'
+has "clean URL authenticated" "$(cat "$WORK/out8")" "1 of 1 authenticated"
+
+# `back` is what replaces Up/Escape at a terminal now that the line editor owns
+# the arrow keys.
+echo "== typing back returns to the previous question =="
+printf 'http://127.0.0.1:18801\nback\nhttp://127.0.0.1:18801\ntestuser\ntestpass\nTEST PRO\n5\n' > "$WORK/in9"
+rc=$(run_install home9 "$WORK/in9" "$WORK/out9")
+check "exits 0" "$rc" "0"
+check "URL list asked twice" "$(grep -c '^URL(s)' "$WORK/out9")" "2"
+check "username recorded after going back" "$(grep -m1 '^ND_USER=' "$(conf home9)")" 'ND_USER="testuser"'
+
+# A bare Escape is a keypress in its own right, and the case that matters is the
+# one where nothing follows it: readline would swallow it as a meta prefix.
+echo "== a bare Escape goes back, and up and down navigate =="
+printf 'http://127.0.0.1:18801\nfirstuser\n\033' > "$WORK/in10"
+rc=$(run_install home10 "$WORK/in10" "$WORK/out10")
+check "exits 0" "$rc" "0"
+check "username asked twice after Escape" "$(grep -c '^Username' "$WORK/out10")" "2"
+has "input running out still cancels" "$(cat "$WORK/out10")" "Cancelled"
+
+printf 'http://127.0.0.1:18801\n\033[A\033[B\ntestuser\ntestpass\nTEST PRO\n5\n' > "$WORK/in11"
+rc=$(run_install home11 "$WORK/in11" "$WORK/out11")
+check "exits 0" "$rc" "0"
+check "Up goes back to the URL list" "$(grep -c '^URL(s)' "$WORK/out11")" "2"
+check "Down comes forward again" "$(grep -m1 '^ND_USER=' "$(conf home11)")" 'ND_USER="testuser"'
+
+echo "== backspace corrects a value =="
+printf 'http://127.0.0.1:18801X\177\ntestuser\ntestpass\nTEST PRO\n5\n' > "$WORK/in12"
+rc=$(run_install home12 "$WORK/in12" "$WORK/out12")
+check "exits 0" "$rc" "0"
+check "the deleted character is gone" "$(grep -m1 '^ND_URLS=' "$(conf home12)")" 'ND_URLS="http://127.0.0.1:18801"'
+has "the corrected URL authenticates" "$(cat "$WORK/out12")" "1 of 1 authenticated"
+
 # ------------------------------------------------------ a rejected login ------
 echo "== a rejected login is named, and can be accepted =="
-printf 'TEST PRO\nhttp://127.0.0.1:18802\ntestuser\ntestpass\n5\nn\ny\n' > "$WORK/in5"
+printf 'http://127.0.0.1:18802\ntestuser\ntestpass\nTEST PRO\n5\nn\ny\n' > "$WORK/in5"
 rc=$(run_install home5 "$WORK/in5" "$WORK/out5")
 check "exits 0" "$rc" "0"
 has "rejection reported" "$(cat "$WORK/out5")" "rejected"
@@ -169,7 +226,7 @@ check "config still written" "$([ -f "$(conf home5)" ] && echo yes)" "yes"
 
 # ------------------------- connect-then-silence is told apart from a refusal --
 echo "== a server that accepts and never answers is diagnosed =="
-printf 'TEST PRO\nhttp://127.0.0.1:18803\ntestuser\ntestpass\n5\nn\ny\n' > "$WORK/in6"
+printf 'http://127.0.0.1:18803\ntestuser\ntestpass\nTEST PRO\n5\nn\ny\n' > "$WORK/in6"
 rc=$(run_install home6 "$WORK/in6" "$WORK/out6")
 check "exits 0" "$rc" "0"
 has "diagnosis names the case" "$(cat "$(installed_log home6)")" "the TCP connection opened and the server never replied"

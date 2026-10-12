@@ -38,6 +38,7 @@ fi
 # From here on, everything on screen is mirrored into a timestamped log, and the URL
 # checks add depth of their own. The log records the reasoning, not only results.
 log_init
+trap '_interrupted' INT TERM
 if [ -n "$SHOKZ_LOG" ]; then
     log_env
     exec 3>&1 4>&2
@@ -149,11 +150,11 @@ if [ "$INSTALLED" = 1 ]; then
 fi
 
 # ------------------------------------------------------- ask for the settings
-# Every question is a step. Escape goes back one, Ctrl-C cancels, and each answer
-# lives in its own variable, so stepping back never costs a later answer.
+# Every question is a step. `back` returns to the previous one, Ctrl-C cancels, and
+# each answer lives in its own variable, so stepping back never costs a later answer.
 
-say "Up or Escape goes back a question, Down moves forward to one you have already"
-say "answered, and Ctrl-C cancels."
+say "Escape or Up goes back a question, Down moves forward to one you have already"
+say "answered, and Ctrl-C cancels. Backspace works, and a URL can be pasted."
 say ""
 
 DEVICE_NAME="$CUR_DEVICE"
@@ -163,10 +164,10 @@ ND_PASS="$CUR_PASS"
 SONG_COUNT="${CUR_SONGS:-50}"
 
 STEPS=()
-[ "$DO_DEVICE" = 1 ] && STEPS+=("device")
 [ "$DO_URLS" = 1 ] && STEPS+=("urls")
 [ "$DO_LOGIN" = 1 ] && STEPS+=("username")
 [ "$DO_LOGIN" = 1 ] && STEPS+=("password")
+[ "$DO_DEVICE" = 1 ] && STEPS+=("device")
 [ "$DO_SONGS" = 1 ] && STEPS+=("songs")
 
 STEP_INDEX=0

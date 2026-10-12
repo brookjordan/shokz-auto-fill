@@ -333,92 +333,210 @@ log_env() {
 
 
 # Undo the installer's tee and let it drain, so the last log lines are not lost.
+# Also puts the terminal back into canonical mode with echo on, so a run that
+# inherited a terminal left raw by an older version cannot leave it that way.
+_RESTORED=0
 _restore_output() {
-    stty icanon echo 2>/dev/null || true
+    if [ "${_RESTORED:-0}" = 1 ]; then return 0; fi
+    _RESTORED=1
+    # Let the caller stop any background work it started, so leaving does not sit
+    # waiting for a network check to time out.
+    if command -v stop_checks >/dev/null 2>&1; then stop_checks; fi
+    stty icanon echo isig 2>/dev/null || true
     exec 1>&3 2>&4 2>/dev/null || true
     exec 3>&- 4>&- 2>/dev/null || true
     wait 2>/dev/null || true
+    return 0
+}
+
+# Ctrl-C during a prompt. The EXIT trap does the terminal and tee cleanup.
+_interrupted() {
+    printf '\nCancelled. Nothing was changed.\n' >&2
+    exit 130
 }
 
 # ---------------------------------------------------------------- prompting --
-# Interactive reads that support stepping back. A bare Escape is caught by reading
-# one keystroke in raw mode; the rest of the line is read normally, so editing and
-# pasting still work. Values live in globals, so revisiting a step never costs an
-# answer given at another one.
+# One reader for every question, used whether stdin is a terminal or a pipe - so
+# the tests drive the same code the terminal does.
+#
+# The terminal is put into non-canonical, no-echo mode and this reader echoes what
+# it accepts. That is deliberate: bash's line editor (readline) treats a bare
+# Escape as the start of a meta sequence and swallows it, which is how "Escape goes
+# back a step" was lost. Reading the keys here also keeps an arrow key from landing
+# in the value as literal characters, and lets a bracketed paste be stepped over so
+# the pasted text is inserted normally.
+#
+#   Escape / Up / back / <   go back one question
+#   Down / next / >          move forward to a question already answered
+#   Backspace                delete one character
+#   Ctrl-U                   clear the line
+#   Left / Right             ignored: answers are typed at the end
+#   Ctrl-C / Ctrl-D          cancel
+#
+# At the password prompt only Escape, < and > navigate, because a password can be
+# any string.
+#
+# Values live in globals, so revisiting a step never costs an answer given at
+# another one.
 
 STEP_VALUE=""
 SECRET_VALUE=""
 
-# Read one line. Returns 0 for a line, 1 for Escape, 2 for cancel.
-_read_core() {
-    local silent="$1" first rest nxt rc
-    STEP_VALUE=""
+# Drop terminal escape sequences and their leftovers, so a sequence that arrived in
+# pieces cannot become invisible characters inside a URL or a volume name. A CSI
+# sequence is ESC [ parameters final-byte, the final byte being anything from @ to
+# ~, which covers both an arrow key (ESC [ A) and a paste marker (ESC [ 200 ~).
+sanitize_answer() {
+    local esc=$'\e'
+    printf '%s' "$1" | sed -e "s/${esc}\[[0-9;?]*[@-~]//g" -e "s/${esc}//g" | tr -d '[:cntrl:]'
+}
+
+# Put the terminal back the way it was found.
+_end_read() {
+    if [ -t 0 ]; then stty icanon echo isig 2>/dev/null || true; fi
+    return 0
+}
+
+# The terminal while an ordinary key is awaited: block until one arrives.
+_tty_wait_key() {
+    if [ -t 0 ]; then stty -icanon -echo min 1 time 0 2>/dev/null || true; fi
+    return 0
+}
+
+# The terminal while the byte after an Escape is awaited. `min 0 time 1` is the
+# driver's own tenth-of-a-second window, and it is what tells a lone Escape from
+# the start of an arrow key. It is used in place of `read -t 0.1` because
+# /bin/bash on macOS is 3.2, which rejects a fractional timeout outright
+# ("read: 0.1: invalid timeout specification") and would report every arrow key as
+# a bare Escape.
+_tty_wait_byte() {
+    if [ -t 0 ]; then stty -icanon -echo min 0 time 1 2>/dev/null || true; fi
+    return 0
+}
+
+# Read one line into REPLY_LINE. Returns 0 for a line, 1 for back, 3 for forward,
+# 2 for cancel or no more input.
+#   $1 prompt, $2 = 1 to keep the answer off the screen
+#
+# `seq` carries the escape-sequence state between keystrokes:
+#   0  ordinary
+#   1  an Escape has been read and may be a keypress of its own
+#   2  inside a sequence (Escape [ ... or Escape O ...)
+# Every Escape restarts that state, so two arrow keys pressed together cannot leave
+# a stray byte behind, and a bracketed paste is stepped over marker by marker while
+# the text between the markers is read as ordinary characters.
+_read_line_bytes() {
+    local prompt="$1" quiet="${2:-0}" buf="" ch seq=0
+
+    printf '%s: ' "$prompt" >&2
+    _tty_wait_key
+
     while :; do
-        if [ "$silent" = 1 ]; then
-            IFS= read -rsn1 first; rc=$?
+        if IFS= read -rsn1 ch; then
+            # bash's -n stops at the delimiter and does not hand it back, so an
+            # empty value with success is the newline that ends the line.
+            if [ -z "$ch" ]; then
+                case "$seq" in
+                    1) _end_read; printf '\n' >&2; return 1 ;;
+                    2) seq=0; _tty_wait_key; continue ;;
+                    *) break ;;
+                esac
+            fi
         else
-            IFS= read -rn1 first; rc=$?
+            # No byte at all: either the input ended, or the window above ran out.
+            case "$seq" in
+                1) _end_read; printf '\n' >&2; return 1 ;;
+                2) seq=0; _tty_wait_key; continue ;;
+                *)
+                    if [ -n "$buf" ]; then break; fi
+                    _end_read
+                    printf '\n' >&2
+                    return 2 ;;
+            esac
         fi
-        # End of input is not the same as pressing Enter. Without this, exhausted
-        # stdin takes the default forever and the step machine spins.
-        if [ "$rc" -ne 0 ] && [ -z "$first" ]; then return 2; fi
-        case "$first" in
-            $'\e')
-                # Every arrow key starts with ESC. In a plain read the shell is not
-                # using them, so up can mean back and down can mean forward. Any
-                # other escape sequence is drained and ignored.
-                stty -icanon min 0 time 0 2>/dev/null || true
-                IFS= read -rn1 nxt 2>/dev/null || true
-                case "$nxt" in
-                    '['|'O')
-                        IFS= read -rn1 nxt 2>/dev/null || true
-                        case "$nxt" in
-                            A) stty icanon 2>/dev/null || true; return 1 ;;
-                            B) stty icanon 2>/dev/null || true; return 3 ;;
-                            *)
-                                stty -icanon min 0 time 1 2>/dev/null || true
-                                while IFS= read -rn1 nxt 2>/dev/null; do :; done
-                                stty icanon 2>/dev/null || true
-                                continue ;;
-                        esac ;;
-                    *) stty icanon 2>/dev/null || true; return 1 ;;
-                esac ;;
-            $'\x03'|$'\x04') return 2 ;;
+
+        if [ "$ch" = $'\e' ]; then
+            if [ "$seq" = 1 ]; then
+                _end_read
+                printf '\n' >&2
+                return 1
+            fi
+            seq=1
+            _tty_wait_byte
+            continue
+        fi
+
+        if [ "$seq" = 1 ]; then
+            case "$ch" in
+                '['|'O') seq=2; _tty_wait_byte; continue ;;
+                *)       _end_read; printf '\n' >&2; return 1 ;;
+            esac
+        fi
+        if [ "$seq" = 2 ]; then
+            case "$ch" in
+                A)      _end_read; printf '\n' >&2; return 1 ;;
+                B)      _end_read; printf '\n' >&2; return 3 ;;
+                [@-~])  seq=0; _tty_wait_key; continue ;;
+                *)      continue ;;
+            esac
+        fi
+
+        case "$ch" in
+            $'\r') break ;;
+            $'\177'|$'\010')
+                if [ -n "$buf" ]; then
+                    buf="${buf%?}"
+                    [ "$quiet" = 1 ] || printf '\b \b' >&2
+                fi ;;
+            $'\025')
+                buf=""
+                [ "$quiet" = 1 ] || printf '\r\033[K%s: ' "$prompt" >&2 ;;
+            $'\003'|$'\004')
+                _end_read
+                printf '\n' >&2
+                return 2 ;;
+            *)
+                buf="${buf}${ch}"
+                [ "$quiet" = 1 ] || printf '%s' "$ch" >&2 ;;
         esac
-        break
     done
-    [ -n "$first" ] || return 0
-    if [ "$silent" = 1 ]; then
-        IFS= read -rs rest || true
-    else
-        IFS= read -r rest || true
-    fi
-    STEP_VALUE="${first}${rest}"
+
+    _end_read
+    if [ "$quiet" = 1 ]; then printf '\n' >&2; fi
+    REPLY_LINE="$buf"
     return 0
 }
 
 # Prompt with the brackets supplied by the caller, e.g. "URL(s) [old]".
+# Returns 0 for a value, 1 for back, 2 for cancel, 3 for forward.
 read_step_raw() {
-    local prompt="$1" default="${2:-}" rc
-    printf '%s: ' "$prompt" >&2
-    stty -icanon min 1 time 0 2>/dev/null || true
-    _read_core 0; rc=$?
-    stty icanon 2>/dev/null || true
-    if [ "$rc" -ne 0 ]; then printf '\n' >&2; return "$rc"; fi
+    local prompt="$1" default="${2:-}" rc line
+    STEP_VALUE=""
+    _read_line_bytes "$prompt" 0; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    line="$REPLY_LINE"
+    case "$line" in
+        back|BACK|Back|'<') return 1 ;;
+        next|NEXT|Next|'>') return 3 ;;
+    esac
+    STEP_VALUE="$(sanitize_answer "$line")"
     [ -n "$STEP_VALUE" ] || STEP_VALUE="$default"
     return 0
 }
 
-# Read without echoing, for the password.
+# Read without echoing, for the password. Only the symbols navigate here: a
+# password is free-form, so no word can be reserved at this prompt.
 read_secret() {
-    local prompt="$1" rc
-    printf '%s: ' "$prompt" >&2
-    stty -icanon min 1 time 0 2>/dev/null || true
-    _read_core 1; rc=$?
-    stty icanon 2>/dev/null || true
-    printf '\n' >&2
-    if [ "$rc" -ne 0 ]; then return "$rc"; fi
+    local prompt="$1" rc line
+    SECRET_VALUE=""
+    _read_line_bytes "$prompt" 1; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    line="$REPLY_LINE"
+    case "$line" in
+        '<') return 1 ;;
+        '>') return 3 ;;
+    esac
     # shellcheck disable=SC2034  # the caller reads this after read_secret
-SECRET_VALUE="$STEP_VALUE"
+    SECRET_VALUE="$line"
     return 0
 }
