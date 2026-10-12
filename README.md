@@ -24,22 +24,33 @@ Double-click **`install.command`** (or run `./install.command`).
 
 It asks for:
 
-**Up or Escape goes back a question, Down moves forward to one you have already
-answered, and Ctrl-C cancels.** Every answer is held in its own variable, so stepping
-back never costs you something you typed later, and walking forward again offers what
-you had.
+**Escape or Up goes back a question, Down moves forward to one you have already
+answered, and Ctrl-C cancels. Backspace deletes, and pasting a URL works.** Every
+answer is held in its own variable, so stepping back never costs you something you
+typed later, and walking forward again offers what you had. `back` (or `<`) and `next`
+(or `>`) do the same thing by name, which is what a script driving the installer sends;
+at the password prompt only Escape, `<` and `>`, because a password can be any string.
+
+The server and the login are asked for **first**, so the check they make possible can
+run in the background while you answer the rest.
 
 | Prompt | Notes |
 | --- | --- |
-| **Device** | The volume name, i.e. the folder under `/Volumes`. Currently mounted volumes are listed with numbers, so you can pick one. |
 | **Navidrome URL(s)** | One or more, space- or comma-separated, tried in order at fill time. Put a LAN address first for speed, then a remote one. Every URL is checked during install, because a dead fallback is worth finding now rather than on the day the working one goes away. |
-| **Username** | Your Navidrome account, which need not match your macOS account. Asked for separately from the password, so a typo noticed at the password prompt is one Escape away from being fixed. |
-| **Password** | Not echoed, and checked against the server straight away rather than typed twice. Pressing Enter keeps a password you already entered. |
+| **Username** | Your Navidrome account, which need not match your macOS account. Asked for separately from the password, so a typo noticed at the password prompt is one `<` away from being fixed. |
+| **Password** | Not echoed. Pressing Enter keeps a password you already entered. |
+| **Device** | The volume name, i.e. the folder under `/Volumes`. Currently mounted volumes are listed with numbers, so you can pick one. |
 | **Songs per fill** | Default 50. |
 
-It then **verifies the URL and login against the server before installing**, and
-reports each URL as reachable + authenticated, reachable but rejected, or
-unreachable. Nothing is written unless you continue.
+As soon as the login is in, **every URL is checked against the server in the
+background** while the device and song-count questions are asked. Nothing is written
+unless you continue.
+
+It then reports each URL as reachable + authenticated, reachable but rejected, or
+unreachable, and offers to go back and fix the login or the URL list. Only the answer
+that was wrong is asked for again: fixing a URL does not repeat the login, and neither
+repeats the device or the song count. If the check has not finished by the time the
+questions run out, it says so and waits for it rather than going quiet.
 
 It then requests removable-volume permission, which macOS shows as a dialog. Click
 Allow. See below for why this step exists.
@@ -137,9 +148,13 @@ tail -f /tmp/shokz-auto-fill.log
 - On success the device is ejected with `diskutil eject`. Unplug it and listen.
 - **Only the two newest lists are kept**; older numbered folders are deleted.
   Set `SONG_COUNT` in the config to change the size of each list.
-- A run is guarded by a lock file at `/tmp/shokz-auto-fill.state`, so overlapping
-  `/Volumes` events cannot fill twice. If a run is killed mid-way the lock is
-  released on exit; if one ever sticks, delete that file and replug.
+- A run is guarded by a lock file at `/tmp/shokz-auto-fill.state`, taken with
+  `set -o noclobber` so the test and the create are one step: two `/Volumes` events
+  arriving together cannot both fill. The lock records the pid holding it, and only
+  that run clears it. If a run is killed hard the lock is left behind — the log says
+  so, and names the pid — and the recovery is to delete that file and replug. It is
+  not cleared automatically, because deciding a lock is stale means reading it, and
+  another run can take it between that read and the removal.
 - If nothing can be downloaded, the script **aborts without deleting anything**,
   leaving the existing music in place.
 
@@ -214,22 +229,35 @@ step that the logs did not identify, so it is deliberately not wired to CI until
 understood. It passes here, and it is the only thing covering the installer's behaviour.
 
 ```sh
-bash tests/run.sh
-shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh
+bash tests/run.sh      # the installer, end to end; runs tests/lock.sh too
+bash tests/lock.sh     # the fill script's lock, on its own
+shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh tests/run.sh tests/lock.sh
 ```
 
 `tests/run.sh` drives `install.command` end to end against fake Navidrome servers and a
-stub `launchctl`. It covers the two defects that have shipped here: a device name
-containing a space being split into two menu entries, and exhausted input making the
-question loop spin forever. Every run is bounded by a timeout, so a prompt loop fails the
-test rather than hanging it.
+stub `launchctl`. It covers the defects that have shipped here: a device name
+containing a space being split into two menu entries, exhausted input making the
+question loop spin forever, and prompt input — a pasted URL being swallowed and
+cancelling the run, and arrow-key bytes being stored inside the value. Every run is
+bounded by a timeout, so a prompt loop fails the test rather than hanging it.
+
+`tests/lock.sh` extracts the lock block out of `bin/auto_fill_shokz.sh` and drives it,
+so the test cannot drift from what ships. It covers the overlap that shipped: the lock
+was tested with `[ -f ]` and then created with `touch`, so two `/Volumes` events
+arriving together both got through, and each run cleared the lock on exit whether or
+not it owned it.
 
 The tests never touch the real launchd domain. `HOME` is a throwaway directory and the
 stub `launchctl` is first on `PATH`, which is the lesson from a test that once unloaded a
 real agent.
 
-Not covered yet: the fill script's own logic. Its numbered-folder and download paths need
-a mounted volume, so `bin/auto_fill_shokz.sh` gets syntax and lint only.
+Not covered yet: the rest of the fill script. Its numbered-folder and download paths need
+a mounted volume, so they get syntax and lint only; the lock is the part that can be
+tested without one, and is. Nor does the installer suite use a pty, so the prompts are
+driven through a pipe — the same reader a terminal uses, and the same key handling, with
+the only difference being that a terminal is put into non-canonical, no-echo mode and the
+installer writes the echo itself. What that leaves for a human eye after changing the
+prompt functions is the echo, not the keys.
 
 ## Security
 

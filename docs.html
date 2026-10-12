@@ -262,36 +262,48 @@
       <p>Double-click <code>install.command</code>, or run it in a terminal. It asks for a few
       settings and checks them against the server before it writes anything.</p>
 
-      <p><strong>Up or Escape goes back a question, Down moves forward to one you have already
-        answered, and Ctrl-C cancels.</strong> Every answer is held in its own variable, so
-        stepping back never costs you something you typed later, and walking forward again
-        offers what you had.</p>
+      <p><strong>Escape or Up goes back a question, Down moves forward to one you have already
+        answered, and Ctrl-C cancels. Backspace deletes, and pasting a URL works.</strong> Every
+        answer is held in its own variable, so stepping back never costs you something you typed
+        later, and walking forward again offers what you had. <code>back</code> (or
+        <code>&lt;</code>) and <code>next</code> (or <code>&gt;</code>) do the same thing by name; at
+        the password prompt only Escape, <code>&lt;</code> and <code>&gt;</code>, because a password
+        can be any string.</p>
+
+      <p>The server and the login are asked for <strong>first</strong>, so the check they make
+        possible runs in the background while the rest is answered.</p>
 
       <div class="tablewrap">
         <table>
           <thead><tr><th>Prompt</th><th>Notes</th></tr></thead>
           <tbody>
-            <tr><td><strong>Device</strong></td><td>The volume name, i.e. the folder under <code>/Volumes</code>. Mounted volumes are listed with numbers so you can just pick one.</td></tr>
 <tr><td>Navidrome URLs</td><td>One or more, space- or comma-separated, tried in order at fill
 time. Put a LAN address first, then a remote one. Every URL is checked during install, so a
 dead fallback is found now rather than later.</td></tr>
 <tr><td><strong>Username</strong></td><td>Your Navidrome account, which need not match your
 macOS account. Asked for separately from the password, so a typo noticed at the password
-prompt is one Escape away from being fixed.</td></tr>
-<tr><td><strong>Password</strong></td><td>Not echoed, and checked against the server straight
-away rather than typed twice. Pressing Enter keeps a password you already entered.</td></tr>
+prompt is one <code>&lt;</code> away from being fixed.</td></tr>
+<tr><td><strong>Password</strong></td><td>Not echoed. Pressing Enter keeps a password you
+already entered.</td></tr>
+            <tr><td><strong>Device</strong></td><td>The volume name, i.e. the folder under <code>/Volumes</code>. Mounted volumes are listed with numbers so you can just pick one.</td></tr>
             <tr><td><strong>Songs per fill</strong></td><td>Default 50. Validated as a positive whole number.</td></tr>
           </tbody>
         </table>
       </div>
 
-      <p>Every configured URL is checked, and each one is reported:</p>
-      <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>no answer : http://navidrome.local:4533
-ok        : http://100.64.0.7:4533 (authenticated)
-rejected  : https://music.example.com (Subsonic status='failed')
-1 of 3 authenticated.</code></pre></div>
+      <p>Every configured URL is checked in the background, and each one is reported once the
+        questions are done. Nothing is written unless you continue. If the check has not finished by
+        then, the installer says so and waits for it rather than going quiet.</p>
+      <div class="codewrap"><button class="copy" type="button">Copy</button><pre><code>--- Checking every configured URL ---
+  the background check has not finished; waiting for it
+  no answer : http://navidrome.local:4533
+  ok        : http://100.64.0.7:4533 (authenticated)
+  rejected  : https://music.example.com (Subsonic status='failed')
+  1 of 3 authenticated.</code></pre></div>
 
-      <p>A URL that did not answer can be edited on the spot, and a rejected login re-entered without restarting.</p>
+      <p>A URL that did not answer can be edited on the spot, and a rejected login re-entered
+        without restarting. Only the answer that was wrong is asked for again: fixing a URL does not
+        repeat the login, and neither repeats the device or the song count.</p>
 
       <div class="callout ok">
         <p class="t">A wrong password is caught, not ignored</p>
@@ -321,9 +333,12 @@ rejected  : https://music.example.com (Subsonic status='failed')
       <div class="card">
         <h4>A lock, so overlapping mount events can't double-fill</h4>
         <p>A state file at <code>/tmp/shokz-auto-fill.state</code> is held for the duration of a run and
-          released on exit, whether it succeeded, aborted, or crashed. If a run is killed hard and
-          the lock sticks, delete that file and replug. A run that downloads nothing aborts without
-          deleting anything, so a bad network day never costs you the music already on the device.</p>
+          released on exit by the run that owns it. It is created with <code>set -o noclobber</code>, so
+          the test and the create are a single step and two mount events arriving together cannot both
+          fill. The file records the pid holding it; if a run is killed hard and the lock is left
+          behind, the log names that pid, and the recovery is to delete the file and replug. A run that
+          downloads nothing aborts without deleting anything, so a bad network day never costs you the
+          music already on the device.</p>
       </div>
     </section>
 
