@@ -230,6 +230,9 @@ printf 'http://127.0.0.1:18803\ntestuser\ntestpass\nTEST PRO\n5\nn\ny\n' > "$WOR
 rc=$(run_install home6 "$WORK/in6" "$WORK/out6")
 check "exits 0" "$rc" "0"
 has "diagnosis names the case" "$(cat "$(installed_log home6)")" "the TCP connection opened and the server never replied"
+# A check still in flight when the questions run out has to say so rather than
+# looking like a hang.
+has "an unfinished background check is announced" "$(cat "$WORK/out6")" "the background check has not finished"
 
 # ------------------------------------------------------------------ summary ---
 echo

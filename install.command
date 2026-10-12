@@ -152,9 +152,15 @@ fi
 # ------------------------------------------------------- ask for the settings
 # Every question is a step. `back` returns to the previous one, Ctrl-C cancels, and
 # each answer lives in its own variable, so stepping back never costs a later answer.
+#
+# The server and the login are asked for first, because once they are known the
+# check they make possible can run in the background while the rest is answered.
 
 say "Escape or Up goes back a question, Down moves forward to one you have already"
 say "answered, and Ctrl-C cancels. Backspace works, and a URL can be pasted."
+say ""
+say "The Navidrome server and login come first, so the connection can be checked"
+say "while the remaining questions are asked."
 say ""
 
 DEVICE_NAME="$CUR_DEVICE"
@@ -292,38 +298,101 @@ ask_fix_it() {
     case "$STEP_VALUE" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
 
-# Test every URL. Returns 0 to carry on, 3 to go back to the login, 4 to go back to
-# the URL list, 5 to abandon.
+# Check every URL. The checks are started as soon as the credentials are known -
+# which is why the server and login are asked for first - and they run in the
+# background while the device and song-count questions are answered. Each check
+# appends its own detail to the install log and leaves only its verdict in a file,
+# so nothing lands on the terminal in the middle of a prompt.
+#
+# start_checks begins them; run_checks collects, reports and offers the fixes.
+# Returns 0 to carry on, 3 to go back to the login, 4 to go back to the URL list,
+# 5 to abandon.
 CHECK_ATTEMPT=0
-run_checks() {
-    local n_total=0 n_ok=0 n_reach=0 dead="" u st rc
+CHECK_DIR=""
+CHECK_PIDS=""
+
+_checks_wanted() {
+    [ "$DO_URLS" = 1 ] || [ "$DO_LOGIN" = 1 ]
+}
+
+stop_checks() {
+    local pid
+    for pid in $CHECK_PIDS; do kill "$pid" 2>/dev/null || true; done
+    for pid in $CHECK_PIDS; do wait "$pid" 2>/dev/null || true; done
+    CHECK_PIDS=""
+    if [ -n "$CHECK_DIR" ]; then rm -rf "$CHECK_DIR"; fi
+    CHECK_DIR=""
+    return 0
+}
+
+start_checks() {
+    _checks_wanted || return 0
+    stop_checks
     CHECK_ATTEMPT=$((CHECK_ATTEMPT + 1))
-    if [ "$CHECK_ATTEMPT" -gt 20 ]; then
-        warn "20 rounds without a working URL. Stopping so this cannot loop forever."
-        return 5
-    fi
+    CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shokz-checks.XXXXXX" 2>/dev/null)"
+    [ -n "$CHECK_DIR" ] || return 0
+
     log ""
-    log "--- settings gathered, check attempt $CHECK_ATTEMPT ---"
+    log "--- settings gathered, check attempt $CHECK_ATTEMPT, started in the background ---"
     log "device          : $DEVICE_NAME"
     log "urls            : $ND_URLS"
     log "username        : $ND_USER"
     log "password        : $([ -n "${ND_PASS:-}" ] && echo 'set, never logged' || echo MISSING)"
     log "songs per fill  : $SONG_COUNT"
 
-    if [ "$DO_URLS" != 1 ] && [ "$DO_LOGIN" != 1 ] && [ "$INSTALLED" = 1 ]; then
+    local i=0 u
+    for u in $ND_URLS; do
+        u="${u%/}"
+        ( diag_url "$u" "$ND_USER" "$ND_PASS" 8 > "$CHECK_DIR/$i.status" 2>/dev/null ) &
+        CHECK_PIDS="$CHECK_PIDS $!"
+        i=$((i + 1))
+    done
+    return 0
+}
+
+# Start the checks once the last of the credential questions has been answered, so
+# the work overlaps the questions that follow rather than delaying them.
+start_checks_after() {  # $1 = the step just answered, $2 = index of the next step
+    local done_step="$1" nxt="${2:-}"
+    case "$done_step" in urls|username|password) ;; *) return 0 ;; esac
+    case "${STEPS[$nxt]:-}" in urls|username|password) return 0 ;; esac
+    start_checks
+}
+
+run_checks() {
+    local n_total=0 n_ok=0 n_reach=0 dead="" u st rc i pid waiting=0
+
+    if ! _checks_wanted && [ "$INSTALLED" = 1 ]; then
         say ""
         say "Settings changed only - no server check needed (credentials unchanged)."
         say ""
         return 0
     fi
 
+    if [ "$CHECK_ATTEMPT" -gt 20 ]; then
+        warn "20 rounds without a working URL. Stopping so this cannot loop forever."
+        return 5
+    fi
+    [ -n "$CHECK_DIR" ] || start_checks
+
+    # Say so rather than going quiet if the questions finished first.
+    for pid in $CHECK_PIDS; do
+        kill -0 "$pid" 2>/dev/null && waiting=1
+    done
     say ""
     say "--- Checking every configured URL ---"
+    if [ "$waiting" = 1 ]; then
+        say "  the background check has not finished; waiting for it"
+    fi
+    for pid in $CHECK_PIDS; do wait "$pid" 2>/dev/null; done
+
+    i=0
     for u in $ND_URLS; do
         u="${u%/}"
         n_total=$((n_total + 1))
-        st="$(diag_url "$u" "$ND_USER" "$ND_PASS" 8)"
-        log "    verdict      : ${st:-no answer}"
+        st=""
+        [ -f "$CHECK_DIR/$i.status" ] && st="$(cat "$CHECK_DIR/$i.status" 2>/dev/null)"
+        log "    verdict      : ${st:-no answer}   ($u)"
         if [ -z "$st" ]; then
             say "  no answer : $u"
             dead="$dead $u"
@@ -334,8 +403,10 @@ run_checks() {
             say "  rejected  : $u (Subsonic status='$st')"
             n_reach=$((n_reach + 1))
         fi
+        i=$((i + 1))
     done
     say "  ${n_ok} of ${n_total} authenticated."
+    stop_checks
 
     if [ "$n_ok" -gt 0 ] && [ -z "$dead" ]; then return 0; fi
 
@@ -371,6 +442,11 @@ i=0
 rc=0
 while :; do
     while [ "$i" -lt "${#STEPS[@]}" ]; do
+        # Re-answering any credential question invalidates a check already running,
+        # so drop it; it restarts when the credentials are complete again.
+        case "${STEPS[$i]}" in
+            urls|username|password) stop_checks ;;
+        esac
         case "${STEPS[$i]}" in
             device) ask_device; rc=$? ;;
             urls)   ask_urls;   rc=$? ;;
@@ -381,6 +457,7 @@ while :; do
         esac
         if [ "$rc" -eq 0 ]; then
             [ "$i" -gt "$MAX_REACHED" ] && MAX_REACHED="$i"
+            start_checks_after "${STEPS[$i]}" "$((i + 1))"
             i=$((i + 1))
         elif [ "$rc" -eq 1 ]; then
             if [ "$i" -gt 0 ]; then
