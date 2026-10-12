@@ -14,12 +14,12 @@ jobs:
 
       - name: bash syntax
         run: |
-          for f in install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh; do
+          for f in install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh tests/run.sh tests/lock.sh; do
             bash -n "$f"
           done
 
       - name: shellcheck
-        run: shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh
+        run: shellcheck -S warning install.command uninstall.command lib/common.sh bin/auto_fill_shokz.sh tests/run.sh tests/lock.sh
 
   # The installer suite is NOT run here. It needs a mounted volume, Homebrew bash and
   # plutil, and on a macOS runner it hangs for the full per-run timeout inside a step I

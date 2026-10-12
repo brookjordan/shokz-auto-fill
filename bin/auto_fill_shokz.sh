@@ -42,6 +42,34 @@ STATE_FILE="/tmp/shokz-auto-fill.state"
 AUTO_DIR="$TARGET/auto-list"
 LOG_FILE="/tmp/shokz-auto-fill.log"
 
+# ----------------------------------------------------------------- the lock ---
+# One fill at a time, taken before the log is trimmed or anything on the device is
+# touched. `set -o noclobber` makes the test and the create a single atomic step:
+# a plain `[ -f ]` followed by `touch` lets two WatchPaths firings through
+# together, and two fills numbering folders on one device then delete each other's
+# work. The lock records its owner, and only that owner clears it.
+#
+# A lock left by a run that was killed is not cleared automatically - deciding a
+# lock is stale means reading it, and another run can take it between that read and
+# the removal - so it is reported by pid instead, with what to do about it.
+release_lock() {
+    if [ "$(cat "$STATE_FILE" 2>/dev/null)" = "$$" ]; then rm -f "$STATE_FILE"; fi
+}
+
+if ! ( set -o noclobber; printf '%s\n' "$$" > "$STATE_FILE" ) 2>/dev/null; then
+    owner="$(cat "$STATE_FILE" 2>/dev/null)"
+    printf '%s\n' "--- $(date) --- another fill is running; skipping. The lock records pid ${owner:-unknown}." \
+        | tee -a "$LOG_FILE"
+    if [ -z "$owner" ] || ! kill -0 "$owner" 2>/dev/null; then
+        printf '%s\n' "That process is gone, so the lock is stale: delete $STATE_FILE and replug." \
+            | tee -a "$LOG_FILE"
+    fi
+    exit 0
+fi
+# Always drop the lock when this run exits (success, abort, or crash) so WatchPaths
+# firings don't silently no-op forever after an interrupted fill.
+trap 'release_lock' EXIT
+
 # Touch log if it doesn't exist, then trim it to the last 1000 lines
 touch "$LOG_FILE"
 echo "$(tail -n 1000 "$LOG_FILE")" > "$LOG_FILE"
@@ -55,7 +83,7 @@ echo "--- Script started at $(date) ---"
 abort() {
     echo "ABORT: $1"
     echo "Short-circuiting: no new auto-list folder, no cleanup, no eject."
-    rm -f "$STATE_FILE"
+    release_lock
     echo "--- Script aborted at $(date) ---"
     exit 1
 }
@@ -64,21 +92,9 @@ abort() {
 sleep 2
 
 if [ ! -d "$TARGET" ]; then
-    [ ! -f "$STATE_FILE" ] && rm -f "$STATE_FILE"
     echo "$DEVICE_NAME not mounted; nothing to do."
     exit 0
 fi
-
-if [ -f "$STATE_FILE" ]; then
-    echo "State file exists (another run in progress or a prior run crashed). Skipping."
-    echo "If this persists with no download underway, delete ${STATE_FILE} and replug."
-    exit 0
-fi
-
-touch "$STATE_FILE"
-# Always drop the lock when this run exits (success, abort, or crash) so WatchPaths
-# firings don't silently no-op forever after an interrupted fill.
-trap 'rm -f "$STATE_FILE"' EXIT
 
 make_auth() {
     SALT=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)

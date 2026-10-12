@@ -255,6 +255,17 @@ has "diagnosis names the case" "$(cat "$(installed_log home6)")" "the TCP connec
 # looking like a hang.
 has "an unfinished background check is announced" "$(cat "$WORK/out6")" "the background check has not finished"
 
+# ------------------------------------------------ the fill script's lock -------
+# Covered here rather than in run.sh's own scenarios because it needs no mounted
+# volume: tests/lock.sh pulls the lock block out of the installed script.
+echo "== the fill script takes only one run at a time =="
+if bash "$TESTS/lock.sh" > "$WORK/lock-out" 2>&1; then
+    ok "one fill at a time (tests/lock.sh)"
+else
+    bad "one fill at a time - tests/lock.sh reported:"
+    sed 's/^/        /' "$WORK/lock-out"
+fi
+
 # ------------------------------------------------------------------ summary ---
 echo
 echo "  $PASS passed, $FAIL failed"
